@@ -10,3 +10,6 @@ screenshots
 
 job.*
 sbatch*
+submit.sh
+_test.py
+*.out

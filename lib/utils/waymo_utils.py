@@ -462,11 +462,12 @@ def generate_dataparser_outputs(
         for track_id in object_info.keys():
             points_xyz_dict[f'obj_{track_id:03d}'] = []
             points_rgb_dict[f'obj_{track_id:03d}'] = []
-
-        print('initialize from sfm pointcloud')
-        points_colmap_path = os.path.join(colmap_basedir, 'triangulated/sparse/model/points3D.bin')
-        points_colmap_xyz, points_colmap_rgb, points_colmap_error = read_points3D_binary(points_colmap_path)
-        points_colmap_rgb = points_colmap_rgb / 255.
+        
+        if cfg.data.use_colmap:
+            print('initialize from sfm pointcloud')
+            points_colmap_path = os.path.join(colmap_basedir, 'triangulated/sparse/model/points3D.bin')
+            points_colmap_xyz, points_colmap_rgb, points_colmap_error = read_points3D_binary(points_colmap_path)
+            points_colmap_rgb = points_colmap_rgb / 255.
                      
         print('initialize from lidar pointcloud')
         pointcloud_path = os.path.join(datadir, 'pointcloud.npz')
@@ -620,10 +621,11 @@ def generate_dataparser_outputs(
         
         points_xyz_dict['lidar'] = points_lidar_xyz
         points_rgb_dict['lidar'] = points_lidar_rgb
-        points_xyz_dict['colmap'] = points_colmap_xyz
-        points_rgb_dict['colmap'] = points_colmap_rgb
         points_xyz_dict['bkgd'] = points_bkgd_xyz
         points_rgb_dict['bkgd'] = points_bkgd_rgb
+        if cfg.data.use_colmap:
+            points_xyz_dict['colmap'] = points_colmap_xyz
+            points_rgb_dict['colmap'] = points_colmap_rgb
             
         result['points_xyz_dict'] = points_xyz_dict
         result['points_rgb_dict'] = points_rgb_dict

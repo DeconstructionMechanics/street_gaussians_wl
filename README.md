@@ -10,10 +10,29 @@
 https://github.com/user-attachments/assets/f28a64bd-9932-4447-b710-9254ae5ed56f
 
 ### Installation
+For installation in the Linux GPU server
+
+<details> <summary>Install CUDA</summary>
+
+```
+cd
+
+wget https://developer.download.nvidia.com/compute/cuda/11.8.0/local_installers/cuda_11.8.0_520.61.05_linux.run -O cuda_11.8_installer.run
+
+mkdir -p ~/CUDA/cuda-11.8/
+
+bash cuda_11.8_installer.run --silent --toolkit --toolkitpath=~/CUDA/cuda-11.8 --override
+
+export CUDA_HOME=$HOME/CUDA/cuda-11.8
+
+rm /tmp/cuda-installer.log
+```
+</details>
+
 <details> <summary>Clone this repository</summary>
 
 ```
-git clone https://github.com/zju3dv/street_gaussians.git
+git clone https://github.com/DeconstructionMechanics/street_gaussians_wl.git
 ```
 </details>
 
@@ -25,16 +44,16 @@ conda create -n street-gaussian python=3.8
 conda activate street-gaussian
 
 # Install torch (corresponding to your CUDA version)
-pip install torch==1.13.1+cu116 torchvision==0.14.1+cu116 torchaudio==0.13.1 --extra-index-url https://download.pytorch.org/whl/cu116
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 
 # Install requirements
 pip install -r requirments.txt
 
 # Install submodules
-pip install ./submodules/diff-gaussian-rasterization
-pip install ./submodules/simple-knn
-pip install ./submodules/simple-waymo-open-dataset-reader
-python script/test_gaussian_rasterization.py
+srun --pty -p v100 --qos v100 --cpus-per-task=8 --gres=gpu:1 pip install ./submodules/diff-gaussian-rasterization
+srun --pty -p v100 --qos v100 --cpus-per-task=8 --gres=gpu:1 pip install ./submodules/simple-knn
+srun --pty -p v100 --qos v100 --cpus-per-task=8 --gres=gpu:1 pip install ./submodules/simple-waymo-open-dataset-reader
+srun --pty -p v100 --qos v100 --cpus-per-task=8 --gres=gpu:1 python script/test_gaussian_rasterization.py
 ```
 </details>
 
