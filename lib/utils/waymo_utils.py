@@ -621,10 +621,11 @@ def generate_dataparser_outputs(
         
         points_xyz_dict['lidar'] = points_lidar_xyz
         points_rgb_dict['lidar'] = points_lidar_rgb
-        points_xyz_dict['colmap'] = points_colmap_xyz
-        points_rgb_dict['colmap'] = points_colmap_rgb
         points_xyz_dict['bkgd'] = points_bkgd_xyz
         points_rgb_dict['bkgd'] = points_bkgd_rgb
+        if cfg.data.use_colmap:
+            points_xyz_dict['colmap'] = points_colmap_xyz
+            points_rgb_dict['colmap'] = points_colmap_rgb
             
         result['points_xyz_dict'] = points_xyz_dict
         result['points_rgb_dict'] = points_rgb_dict
