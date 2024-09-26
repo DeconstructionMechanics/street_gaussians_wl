@@ -48,6 +48,7 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 
 # Install requirements
 pip install -r requirments.txt
+pip install ninja
 
 # Install submodules
 srun --pty -p v100 --qos v100 --cpus-per-task=8 --gres=gpu:1 pip install ./submodules/diff-gaussian-rasterization
