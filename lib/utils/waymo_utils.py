@@ -444,10 +444,11 @@ def generate_dataparser_outputs(
     #     cv2.imwrite(f'obj_bounds/{i}.png', x)
     
     # run colmap
-    colmap_basedir = os.path.join(f'{cfg.model_path}/colmap')
-    if not os.path.exists(os.path.join(colmap_basedir, 'triangulated/sparse/model')):
-        from script.waymo.colmap_waymo_full import run_colmap_waymo
-        run_colmap_waymo(result)
+    if cfg.data.use_colmap:
+        colmap_basedir = os.path.join(f'{cfg.model_path}/colmap')
+        if not os.path.exists(os.path.join(colmap_basedir, 'triangulated/sparse/model')):
+            from script.waymo.colmap_waymo_full import run_colmap_waymo
+            run_colmap_waymo(result)
     
     if build_pointcloud:
         print('build point cloud')
@@ -579,34 +580,40 @@ def generate_dataparser_outputs(
                 
                 else:
                     raise NotImplementedError()
-
-        # Get sphere center and radius
-        lidar_sphere_normalization = get_Sphere_Norm(points_lidar_xyz)
-        sphere_center = lidar_sphere_normalization['center']
-        sphere_radius = lidar_sphere_normalization['radius']
-
-        # combine SfM pointcloud with LiDAR pointcloud
-        try:
-            if cfg.data.filter_colmap:
-                points_colmap_mask = np.ones(points_colmap_xyz.shape[0], dtype=np.bool_)
-                for i, ext in enumerate(exts):
-                    # if frames_idx[i] not in train_frames:
-                    #     continue
-                    camera_position = c2ws[i][:3, 3]
-                    radius = np.linalg.norm(points_colmap_xyz - camera_position, axis=-1)
-                    mask = np.logical_or(radius < cfg.data.get('extent', 10), points_colmap_xyz[:, 2] < camera_position[2])
-                    points_colmap_mask = np.logical_and(points_colmap_mask, ~mask)        
-                points_colmap_xyz = points_colmap_xyz[points_colmap_mask]
-                points_colmap_rgb = points_colmap_rgb[points_colmap_mask]
-            
-            points_colmap_dist = np.linalg.norm(points_colmap_xyz - sphere_center, axis=-1)
-            mask = points_colmap_dist < 2 * sphere_radius
-            points_colmap_xyz = points_colmap_xyz[mask]
-            points_colmap_rgb = points_colmap_rgb[mask]
         
-            points_bkgd_xyz = np.concatenate([points_lidar_xyz, points_colmap_xyz], axis=0) 
-            points_bkgd_rgb = np.concatenate([points_lidar_rgb, points_colmap_rgb], axis=0)
-        except:
+        not_use_colmap = True
+        if cfg.data.use_colmap:
+            not_use_colmap = False
+            # Get sphere center and radius
+            lidar_sphere_normalization = get_Sphere_Norm(points_lidar_xyz)
+            sphere_center = lidar_sphere_normalization['center']
+            sphere_radius = lidar_sphere_normalization['radius']
+
+            # combine SfM pointcloud with LiDAR pointcloud
+            try:
+                if cfg.data.filter_colmap:
+                    points_colmap_mask = np.ones(points_colmap_xyz.shape[0], dtype=np.bool_)
+                    for i, ext in enumerate(exts):
+                        # if frames_idx[i] not in train_frames:
+                        #     continue
+                        camera_position = c2ws[i][:3, 3]
+                        radius = np.linalg.norm(points_colmap_xyz - camera_position, axis=-1)
+                        mask = np.logical_or(radius < cfg.data.get('extent', 10), points_colmap_xyz[:, 2] < camera_position[2])
+                        points_colmap_mask = np.logical_and(points_colmap_mask, ~mask)        
+                    points_colmap_xyz = points_colmap_xyz[points_colmap_mask]
+                    points_colmap_rgb = points_colmap_rgb[points_colmap_mask]
+                
+                points_colmap_dist = np.linalg.norm(points_colmap_xyz - sphere_center, axis=-1)
+                mask = points_colmap_dist < 2 * sphere_radius
+                points_colmap_xyz = points_colmap_xyz[mask]
+                points_colmap_rgb = points_colmap_rgb[mask]
+            
+                points_bkgd_xyz = np.concatenate([points_lidar_xyz, points_colmap_xyz], axis=0) 
+                points_bkgd_rgb = np.concatenate([points_lidar_rgb, points_colmap_rgb], axis=0)
+            except:
+                not_use_colmap = True
+                
+        if not_use_colmap:
             print('No colmap pointcloud')
             points_bkgd_xyz = points_lidar_xyz
             points_bkgd_rgb = points_lidar_rgb

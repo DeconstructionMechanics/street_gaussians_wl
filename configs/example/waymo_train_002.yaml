@@ -10,7 +10,7 @@ data:
   selected_frames: [98, 198]
   cameras: [0, 1, 2]
   extent: 10
-  use_colmap: true
+  use_colmap: false
   filter_colmap: true
 
 model:
