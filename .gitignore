@@ -9,3 +9,4 @@ tensorboard_3d
 screenshots
 submit.sh
 _test.py
+*.out
