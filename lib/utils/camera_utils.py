@@ -43,7 +43,7 @@ class Camera(nn.Module):
         for name, mask in masks.items():
             setattr(self, name, mask)
         
-        self.original_image = image.clamp(0, 1)                
+        self.original_image = image.clamp(0, 1)
         self.image_height, self.image_width = self.original_image.shape[1], self.original_image.shape[2]
         self.zfar = 1000.0
         self.znear = 0.001

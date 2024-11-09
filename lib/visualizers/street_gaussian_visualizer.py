@@ -137,6 +137,7 @@ class StreetGaussianVisualizer():
                 self.normals.append(normals)
 
     def save_video_from_frames(self, frames, name, visualize_func=None):
+        print(f"saving video to {name}")
         if len(frames) == 0:
             return
         
@@ -181,7 +182,7 @@ class StreetGaussianVisualizer():
                     imageio.mimwrite(os.path.join(self.result_dir, f'{name}_{str(cam)}.mp4'), frames_cam, fps=cfg.render.fps)
 
     def summarize(self):                
-        if cfg.render.get('save_video', True):
+        if cfg.render.get('save_video', True) or self.save_video:
             self.save_video_from_frames(self.rgbs_gt, 'color_gt')
             self.save_video_from_frames(self.rgbs, 'color')
             self.save_video_from_frames(self.rgbs_bkgd, 'color_bkgd')

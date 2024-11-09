@@ -153,6 +153,59 @@ class GaussianModel(nn.Module):
         self._semantic = nn.Parameter(torch.tensor(semantic, dtype=torch.float, device="cuda").requires_grad_(True))
 
         self.active_sh_degree = self.max_sh_degree
+    
+    def extend_ply(self, path=None, input_ply=None):
+        if path is None:
+            plydata = input_ply
+        else:
+            plydata = PlyData.read(path)
+            plydata = plydata.elements[0]
+
+        xyz = np.stack((np.asarray(plydata["x"]),
+                        np.asarray(plydata["y"]),
+                        np.asarray(plydata["z"])),  axis=1)
+        opacities = np.asarray(plydata["opacity"])[..., np.newaxis]
+ 
+        base_f_names = [p.name for p in plydata.properties if p.name.startswith("f_dc_")]
+        base_f_names = sorted(base_f_names, key = lambda x: int(x.split('_')[-1]))
+        extra_f_names = [p.name for p in plydata.properties if p.name.startswith("f_rest_")]
+        extra_f_names = sorted(extra_f_names, key = lambda x: int(x.split('_')[-1]))
+        features_dc = np.zeros((xyz.shape[0], len(base_f_names)))
+        features_extra = np.zeros((xyz.shape[0], len(extra_f_names)))
+        for idx, attr_name in enumerate(base_f_names):
+            features_dc[:, idx] = np.asarray(plydata[attr_name])
+        for idx, attr_name in enumerate(extra_f_names):
+            features_extra[:, idx] = np.asarray(plydata[attr_name])
+        features_dc = features_dc.reshape(features_dc.shape[0], 3, -1)
+        features_extra = features_extra.reshape(features_extra.shape[0], 3, -1)
+       
+        scale_names = [p.name for p in plydata.properties if p.name.startswith("scale_")]
+        scale_names = sorted(scale_names, key = lambda x: int(x.split('_')[-1]))
+        scales = np.zeros((xyz.shape[0], len(scale_names)))
+        for idx, attr_name in enumerate(scale_names):
+            scales[:, idx] = np.asarray(plydata[attr_name])
+
+        rot_names = [p.name for p in plydata.properties if p.name.startswith("rot_")]
+        rot_names = sorted(rot_names, key = lambda x: int(x.split('_')[-1]))
+        rots = np.zeros((xyz.shape[0], len(rot_names)))
+        for idx, attr_name in enumerate(rot_names):
+            rots[:, idx] = np.asarray(plydata[attr_name])
+
+        semantic_names = [p.name for p in plydata.properties if p.name.startswith("semantic_")]
+        semantic_names = sorted(semantic_names, key = lambda x: int(x.split('_')[-1]))
+        semantic = np.zeros((xyz.shape[0], len(semantic_names)))
+        for idx, attr_name in enumerate(semantic_names):
+            semantic[:, idx] = np.asarray(plydata[attr_name])
+ 
+        self._xyz = nn.Parameter(torch.cat([self._xyz, torch.tensor(xyz, dtype=torch.float, device="cuda")]).requires_grad_(True))
+        self._features_dc = nn.Parameter(torch.cat([self._features_dc, torch.tensor(features_dc, dtype=torch.float, device="cuda").transpose(1, 2).contiguous()]).requires_grad_(True))
+        self._features_rest = nn.Parameter(torch.cat([self._features_rest, torch.tensor(features_extra, dtype=torch.float, device="cuda").transpose(1, 2).contiguous()]).requires_grad_(True))
+        self._opacity = nn.Parameter(torch.cat([self._opacity, torch.tensor(opacities, dtype=torch.float, device="cuda")]).requires_grad_(True))
+        self._scaling = nn.Parameter(torch.cat([self._scaling,torch.tensor(scales, dtype=torch.float, device="cuda")]).requires_grad_(True))
+        self._rotation = nn.Parameter(torch.cat([self._rotation,torch.tensor(rots, dtype=torch.float, device="cuda")]).requires_grad_(True))
+        self._semantic = nn.Parameter(torch.cat([self._semantic,torch.tensor(semantic, dtype=torch.float, device="cuda")]).requires_grad_(True))
+
+        self.active_sh_degree = self.max_sh_degree
             
     def load_state_dict(self, state_dict):  
         self._xyz = state_dict['xyz']  
