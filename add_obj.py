@@ -139,7 +139,7 @@ def depth_to_point_cloud_torch(depth: np.ndarray, fovX: float, fovY: float, worl
     x = x.flatten()
     y = y.flatten()
     # Stack the (x, y, z) points together
-    points_camera_space = torch.stack((y+2, x+7, z), dim=-1)  # Shape: (N, 3)
+    points_camera_space = torch.stack((y, x, z), dim=-1)  # Shape: (N, 3)
 
     # Add a column of ones for homogeneous coordinates
     points_camera_space_homogeneous = torch.cat([points_camera_space, torch.ones(
@@ -159,6 +159,8 @@ def depth_to_point_cloud_torch(depth: np.ndarray, fovX: float, fovY: float, worl
     points_world_space = points_world_space[:, :3] / points_world_space[:, 3].squeeze()[:, None]
 
     # points_world_space[:, [0, 1]] = points_world_space[:, [1, 0]]
+    points_world_space[:, 0] = points_world_space[:, 0] + 3
+    points_world_space[:, 1] = points_world_space[:, 1] - 1
 
     return points_world_space
 
