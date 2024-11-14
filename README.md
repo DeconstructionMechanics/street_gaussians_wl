@@ -54,6 +54,9 @@ pip install ninja
 srun --pty -p v100 --qos v100 --cpus-per-task=8 --gres=gpu:1 pip install ./submodules/diff-gaussian-rasterization
 srun --pty -p v100 --qos v100 --cpus-per-task=8 --gres=gpu:1 pip install ./submodules/simple-knn
 srun --pty -p v100 --qos v100 --cpus-per-task=8 --gres=gpu:1 pip install ./submodules/simple-waymo-open-dataset-reader
+
+srun --pty -p v100 --qos v100 --cpus-per-task=8 --gres=gpu:1 pip install ./submodules/gaussian-lidar-renderer
+
 srun --pty -p v100 --qos v100 --cpus-per-task=8 --gres=gpu:1 python script/test_gaussian_rasterization.py
 ```
 </details>
