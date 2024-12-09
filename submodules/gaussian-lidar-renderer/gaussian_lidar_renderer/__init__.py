@@ -1,111 +1,73 @@
+import os
+import numpy as np
 import torch
-from tqdm import tqdm
-from . import _C
+import torch.nn.functional as F
+from torch.utils.cpp_extension import load
+from .utils import build_rotation, covariance_activation
+
+try:
+    from . import _C
+except Exception as e:
+    _src_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    _C = load(
+        name='gaussian_lidar_renderer',
+        extra_cuda_cflags=["-O3", "--expt-extended-lambda"],
+        extra_cflags=["-O3"],
+        sources=[os.path.join(_src_path, 'src', f) for f in [
+            'bvh.cu',
+            'trace.cu',
+            'construct.cu',
+            'bindings.cpp',
+        ]],
+        extra_include_paths=[
+            os.path.join(_src_path, 'include'),
+        ],
+        verbose=True)
 
 
-class OctreeGaussianNode():
-    def __init__(self, xyz: torch.Tensor, opacity: torch.Tensor, covariance: torch.Tensor, depth=0, max_depth=5, min_points=10, verbose=False):
-        self.children = [None] * 8
-        self.depth = depth
-        self.bb = torch.stack((torch.min(xyz[:,0]), torch.min(xyz[:,1]), torch.min(xyz[:,2]), torch.max(xyz[:,0]), torch.max(xyz[:,1]), torch.max(xyz[:,2])))
+class GaussianLidarRenderer(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, means3D, scales, rotations, opacity, rays_o, rays_d, aabb_scale: float=10):
+        P = means3D.shape[0]
+        rot = build_rotation(rotations)
+        nodes = torch.full((2 * P - 1, 5), -1, device="cuda").int()
+        nodes[:P - 1, 4] = 0
+        nodes[P - 1:, 4] = 1
+        aabbs = torch.zeros(2 * P - 1, 6, device="cuda").float()
+        aabbs[:, :3] = 100000
+        aabbs[:, 3:] = -100000
 
-        if verbose:
-            print(f"{'  ' * (depth - 1)}octree node depth={depth} size={xyz.shape[0]}")
+        a, b, c = rot[:, :, 0], rot[:, :, 1], rot[:, :, 2]
+        m = 3 / aabb_scale
+        sa, sb, sc = m * scales[:, 0], m * scales[:, 1], m * scales[:, 2]
 
-        if len(xyz) > min_points and depth < max_depth:
-            self.is_leaf = False
-            cuts = [torch.median(xyz[:,0]), torch.median(xyz[:,1]), torch.median(xyz[:,2])]
-            # cuts = [(self.bb[0] + self.bb[3])/2, (self.bb[1] + self.bb[4])/2, (self.bb[2] + self.bb[5])/2]
-            mask0 = (xyz[:,0] <= cuts[0]) & (xyz[:,1] <= cuts[1]) & (xyz[:,2] <= cuts[2])
-            if torch.any(mask0):
-                self.children[0] = OctreeGaussianNode(xyz[mask0], opacity[mask0], covariance[mask0], self.depth + 1, max_depth, min_points, verbose)
-            mask1 = (xyz[:,0] <= cuts[0]) & (xyz[:,1] <= cuts[1]) & (xyz[:,2] > cuts[2])
-            if torch.any(mask1):
-                self.children[1] = OctreeGaussianNode(xyz[mask1], opacity[mask1], covariance[mask1], self.depth + 1, max_depth, min_points, verbose)
-            mask2 = (xyz[:,0] <= cuts[0]) & (xyz[:,1] > cuts[1]) & (xyz[:,2] <= cuts[2])
-            if torch.any(mask2):
-                self.children[2] = OctreeGaussianNode(xyz[mask2], opacity[mask2], covariance[mask2], self.depth + 1, max_depth, min_points, verbose)
-            mask3 = (xyz[:,0] <= cuts[0]) & (xyz[:,1] > cuts[1]) & (xyz[:,2] > cuts[2])
-            if torch.any(mask3):
-                self.children[3] = OctreeGaussianNode(xyz[mask3], opacity[mask3], covariance[mask3], self.depth + 1, max_depth, min_points, verbose)
-            mask4 = (xyz[:,0] > cuts[0]) & (xyz[:,1] <= cuts[1]) & (xyz[:,2] <= cuts[2])
-            if torch.any(mask4):
-                self.children[4] = OctreeGaussianNode(xyz[mask4], opacity[mask4], covariance[mask4], self.depth + 1, max_depth, min_points, verbose)
-            mask5 = (xyz[:,0] > cuts[0]) & (xyz[:,1] <= cuts[1]) & (xyz[:,2] > cuts[2])
-            if torch.any(mask5):
-                self.children[5] = OctreeGaussianNode(xyz[mask5], opacity[mask5], covariance[mask5], self.depth + 1, max_depth, min_points, verbose)
-            mask6 = (xyz[:,0] > cuts[0]) & (xyz[:,1] > cuts[1]) & (xyz[:,2] <= cuts[2])
-            if torch.any(mask6):
-                self.children[6] = OctreeGaussianNode(xyz[mask6], opacity[mask6], covariance[mask6], self.depth + 1, max_depth, min_points, verbose)
-            mask7 = (xyz[:,0] > cuts[0]) & (xyz[:,1] > cuts[1]) & (xyz[:,2] > cuts[2])
-            if torch.any(mask7):
-                self.children[7] = OctreeGaussianNode(xyz[mask7], opacity[mask7], covariance[mask7], self.depth + 1, max_depth, min_points, verbose)
-        else:
-            self.is_leaf = True
-            self.xyz = xyz.clone()
-            self.opacity = opacity.clone()
-            self.covariance = covariance.clone()
+        x111 = means3D + a * sa[:, None] + b * sb[:, None] + c * sc[:, None]
+        x110 = means3D + a * sa[:, None] + b * sb[:, None] - c * sc[:, None]
+        x101 = means3D + a * sa[:, None] - b * sb[:, None] + c * sc[:, None]
+        x100 = means3D + a * sa[:, None] - b * sb[:, None] - c * sc[:, None]
+        x011 = means3D - a * sa[:, None] + b * sb[:, None] + c * sc[:, None]
+        x010 = means3D - a * sa[:, None] + b * sb[:, None] - c * sc[:, None]
+        x001 = means3D - a * sa[:, None] - b * sb[:, None] + c * sc[:, None]
+        x000 = means3D - a * sa[:, None] - b * sb[:, None] - c * sc[:, None]
+        aabb_min = torch.minimum(torch.minimum(
+            torch.minimum(torch.minimum(torch.minimum(torch.minimum(torch.minimum(x111, x110), x101), x100), x011),
+                          x010), x001), x000)
+        aabb_max = torch.maximum(torch.maximum(torch.maximum(torch.maximum(
+            torch.maximum(torch.maximum(torch.maximum(x111, x110), x101), x100), x011), x010), x001), x000)
 
-class OctreeGaussian():
-    def __init__(self, covariance: torch.Tensor, xyz: torch.Tensor, opacity: torch.Tensor) -> None:
-        self.rootnode = OctreeGaussianNode(xyz, opacity, covariance, depth=0, max_depth=5, min_points=128, verbose=True)
+        aabbs[P - 1:] = torch.cat([aabb_min, aabb_max], dim=-1)
 
-    def is_intersect(self, beam: torch.Tensor, lidar_position: torch.Tensor, lidar_range: float, bb: torch.Tensor) -> bool:
-        t_atmin = (bb[:3] - lidar_position) / beam
-        t_atmax = (bb[3:] - lidar_position) / beam
-        t_enter = torch.max(torch.min(torch.vstack((t_atmin, t_atmax)),dim=0).values)
-        t_exit = torch.min(torch.max(torch.vstack((t_atmin, t_atmax)),dim=0).values)
-        return t_enter < t_exit and 0 < t_exit < (lidar_range / beam.norm())
+        tree, aabb, morton = _C.create_bvh(means3D, scales, rotations, nodes, aabbs)
+
+        rays_o = rays_o + rays_d * 0.05
+        symm_inv = covariance_activation(scales, rotations)
+        cotrib, opa, tvalue = _C.trace_bvh_opacity(tree, aabb, rays_o, rays_d, means3D, symm_inv, opacity)
+
+        n_contribute, weights, tvalues = cotrib.unsqueeze(-1), opa.unsqueeze(-1), tvalue.unsqueeze(-1)
+        return n_contribute, weights, tvalues
     
-    def get_intersect_gaussians(self, beam: torch.Tensor, lidar_position: torch.Tensor, lidar_range: float):
-        covariance = torch.zeros((0, 6), dtype=torch.float, device="cuda")
-        xyz = torch.zeros((0, 3), dtype=torch.float, device="cuda")
-        opacity = torch.zeros((0, 1), dtype=torch.float, device="cuda")
-        nodestack = [self.rootnode]
-        while len(nodestack) > 0:
-            node = nodestack.pop()
-            if node is None or not self.is_intersect(beam, lidar_position, lidar_range, node.bb):
-                continue
-            if node.is_leaf:
-                covariance = torch.vstack((covariance, node.covariance))
-                xyz = torch.vstack((xyz, node.xyz))
-                opacity = torch.vstack((opacity, node.opacity))
-            else:
-                nodestack += node.children
-                
-        return covariance, xyz, opacity
+    @staticmethod
+    def backward(ctx, grad_n_contribute, grad_weights, grad_tvalues):
+        grad_means3D, grad_scales, grad_rotations, grad_opacity, grad_rays_o, grad_rays_d, grad_aabb_scale = None, None, None, None, None, None, None
+        return grad_means3D, grad_scales, grad_rotations, grad_opacity, grad_rays_o, grad_rays_d, grad_aabb_scale
 
-
-class GaussianLidarRenderer():
-    def __init__(self) -> None:
-        pass
-
-    def render(self, lidar_position: torch.Tensor, beams: torch.Tensor, covariance: torch.Tensor, xyz: torch.Tensor, opacity: torch.Tensor, lidar_range: float=74):
-        '''covariance stripped to n * 6'''
-        octree_gaussian = OctreeGaussian(covariance, xyz, opacity)
-         
-        reflect_points = []
-        weights = []
-
-        beams = beams[torch.randperm(beams.shape[0])]
-        progress_bar = tqdm(total=beams.shape[0])
-        for beam in beams:
-            covariance, xyz, opacity = octree_gaussian.get_intersect_gaussians(beam, lidar_position, lidar_range)
-            if xyz.shape[0] <= 0:
-                continue
-            t, weight = _C.render_beam(lidar_position, beam, covariance, xyz, opacity)
-            if t is not None:
-                reflect_point = beam * t + lidar_position
-                reflect_points.append(reflect_point)
-                weights.append(weight)
-                        
-            progress_bar.set_postfix({"cuda mem": "{:.5f} G".format(torch.cuda.memory_allocated('cuda') / (1024 ** 3))})
-            progress_bar.update()
-
-        reflect_points = torch.stack(reflect_points)
-        weights = torch.tensor(weights)
-
-        return reflect_points, weights
-
-
-            

@@ -1,6 +1,8 @@
-from setuptools import setup
-from torch.utils.cpp_extension import CUDAExtension, BuildExtension
 import os
+from setuptools import setup
+from torch.utils.cpp_extension import BuildExtension, CUDAExtension
+
+_src_path = os.path.dirname(os.path.abspath(__file__))
 
 setup(
     name='gaussian_lidar_renderer',
@@ -8,14 +10,21 @@ setup(
     ext_modules=[
         CUDAExtension(
             name='gaussian_lidar_renderer._C',
-            sources=[
-                'lidar_render.cu',
-                'ext.cpp'
+            sources=[os.path.join(_src_path, 'src', f) for f in [
+                'bvh.cu',
+                'trace.cu',
+                'construct.cu',
+                'bindings.cpp',
+            ]],
+            include_dirs=[
+                os.path.join(_src_path, 'include'),
             ],
-            extra_compile_args={"nvcc": ["-Xcompiler", "-fno-gnu-unique", "-I" + os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "diff-gaussian-rasterization/third_party/glm/")]}
+            extra_compile_args={
+                "nvcc": ["-O3", "--expt-extended-lambda"],
+                "cxx": ["-O3"]}
         ),
     ],
     cmdclass={
-        'build_ext': BuildExtension
-    }
+        'build_ext': BuildExtension,
+    },
 )
