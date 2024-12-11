@@ -104,7 +104,11 @@ class StreetGaussianRenderer():
 
         # Step2: render sky
         if pc.include_sky:
-            sky_color = pc.sky_cubemap(viewpoint_camera, result['acc'].detach())
+            if cfg.render.get('fog', False):
+                sky_color = torch.empty(result['rgb'].shape)
+                sky_color = torch.Tensor(cfg.render.fog_color).unsqueeze(-1).unsqueeze(-1).to(result['rgb'].device)
+            else:
+                sky_color = pc.sky_cubemap(viewpoint_camera, result['acc'].detach())
 
             result['rgb'] = result['rgb'] + sky_color * (1 - result['acc'])
 
