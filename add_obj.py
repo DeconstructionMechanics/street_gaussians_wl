@@ -22,6 +22,9 @@ import imageio
 import torch.nn as nn
 import os
 from scipy.ndimage import median_filter
+from scipy.ndimage import zoom
+
+from perlin_numpy import generate_fractal_noise_2d, generate_perlin_noise_2d
 
 
 def loadCamData(cam_info: CameraInfo, resolution_scale):
@@ -83,6 +86,24 @@ def loadCam(camdata, R, T, foVx=None, foVy=None):
         metadata=deepcopy(camdata["metadata"]),
     )
 
+def is_diff_depth(ori, dst):
+    if math.isnan(ori) or math.isnan(dst):
+        return True
+    if abs(ori - dst) > 0.5:
+        return True
+    return False
+
+dX = [-1, -1, -1,  0, 0,  1, 1, 1]
+dY = [-1,  0,  1, -1, 1, -1, 0, 1]
+ld = 8
+
+def is_floating_depth(i, j, depth):
+    for k in range(ld):
+        if i+dX[k] < 0 or i+dX[k] >= depth.shape[0] or j+dY[k] < 0 or j+dY[k] >= depth.shape[1]:
+            continue
+        if not is_diff_depth(depth[i][j], depth[i+dX[k]][j+dY[k]]):
+            return False
+    return True
 
 def depth_to_point_cloud_torch(depth: np.ndarray, fovX: float, fovY: float, world_view_transform: torch.Tensor):
     """
@@ -99,9 +120,19 @@ def depth_to_point_cloud_torch(depth: np.ndarray, fovX: float, fovY: float, worl
     """
     # Convert depth to a torch tensor
     depth = depth.squeeze()
+    depth2 = depth.copy()
+    for i in range(depth.shape[0]):
+        for j in range(depth.shape[1]):
+            if is_floating_depth(i,j, depth):
+                depth2[i][j] = math.nan
+    print(depth2)
+    depth = depth2.copy()
+    # depth = median_filter(depth, size=5)
+    # depth = zoom(depth, 2, order=2)
 
     # Apply median filter with a window size (e.g., 3x3)
-    depth = torch.from_numpy(median_filter(depth, size=5))
+    depth = torch.from_numpy(depth)
+
     # depth = torch.from_numpy(depth)
     print(depth.shape)
 
@@ -120,12 +151,7 @@ def depth_to_point_cloud_torch(depth: np.ndarray, fovX: float, fovY: float, worl
     y_normalized = (pixel_y - H / 2) / fy
     print(x_normalized.shape, y_normalized.shape)
 
-    valid_mask = ~torch.isnan(depth)
-    depth = depth[valid_mask]
-    x_normalized = x_normalized[valid_mask]
-    y_normalized = y_normalized[valid_mask]
-
-    valid_mask = torch.where(depth >= 470)
+    valid_mask = ((~torch.isnan(depth)) & (depth >= 470)) # TODO: move isnan after noise
     depth = depth[valid_mask]
     x_normalized = x_normalized[valid_mask]
     y_normalized = y_normalized[valid_mask]
@@ -162,7 +188,7 @@ def depth_to_point_cloud_torch(depth: np.ndarray, fovX: float, fovY: float, worl
     points_world_space[:, 0] = points_world_space[:, 0] + 3
     points_world_space[:, 1] = points_world_space[:, 1] - 1
 
-    return points_world_space
+    return points_world_space, valid_mask
 
 
 def save_ply(filename, points, opacity=None, features_dc=None, features_extra=None,
@@ -303,13 +329,22 @@ with torch.no_grad():
     except:
         pass
 
-    pc = depth_to_point_cloud_torch(
+    t_shape = depth.shape
+
+    pc, mask = depth_to_point_cloud_torch(
         depth, cam.FoVx, cam.FoVy, cam.world_view_transform)
+    
+    noise = generate_perlin_noise_2d((1024, 1024), (64, 64))
+    noise = zoom(noise, (t_shape[0]/noise.shape[0], t_shape[1]/noise.shape[1]))
+    noise = noise[mask].flatten()
+    
 
     oc = np.ones((pc.shape[0]))
     oc.fill(5)
     sc = np.zeros((pc.shape[0], pc.shape[1]))
-    sc.fill(-2.7)
+    sc = np.random.rand(pc.shape[0], pc.shape[1]) * 0.7 - 3 + noise[:,None]*1.5
+    sc[:, [0, 1]] = sc[:, [0, 1]] + 0.5
+    # sc.fill(-2.7)
     rt = np.tile(np.array([1, 0, 0, 0]), (pc.shape[0], 1))
 
     fused_color = RGB2SH(torch.tensor(

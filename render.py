@@ -62,10 +62,18 @@ def render_sets():
 def render_trajectory():
     cfg.render.save_image = False
     cfg.render.save_video = True
+    # Assuming A (fog color) and beta are given
+    cfg.render.fog = True
+    fog_color = torch.tensor([0.9, 0.9, 0.9]).to(cfg.data_device)
+    fog_beta = 0.03
+    cfg.render.fog_color = fog_color.tolist()
     
+    print('begin render traj')
+
     with torch.no_grad():
         dataset = Dataset()        
         gaussians = StreetGaussianModel(dataset.scene_info.metadata)
+        gaussians.sky_cubemap.sky_color[:] = fog_color
 
         scene = Scene(gaussians=gaussians, dataset=dataset)
         renderer = StreetGaussianRenderer()
@@ -78,8 +86,23 @@ def render_trajectory():
         cameras = train_cameras + test_cameras
         cameras = list(sorted(cameras, key=lambda x: x.id))
 
+        print('prepare done')
         for idx, camera in enumerate(tqdm(cameras, desc="Rendering Trajectory")):
-            result = renderer.render_all(camera, gaussians)  
+            result = renderer.render_all(camera, gaussians)
+            if cfg.render.get('fog', False):
+                rgb:torch.Tensor = result['rgb']
+                depth:torch.Tensor = result['depth']
+
+                normalized_depth = torch.nan_to_num(depth, nan=torch.inf).to(cfg.data_device)
+
+                dx = torch.exp(-fog_beta * normalized_depth).to(cfg.data_device)
+                dx = dx.squeeze()
+
+                # fog_img = rgb * dx + A * (1 - dx)
+                result['rgb'] = (rgb.to(cfg.data_device) * dx.unsqueeze(0) + fog_color.unsqueeze(1).unsqueeze(2) * (1 - dx.unsqueeze(0))).cpu()
+                # print(result['rgb'].shape)
+            
+            
             visualizer.visualize(result, camera)
 
         visualizer.summarize()
