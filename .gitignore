@@ -13,3 +13,5 @@ sbatch*
 submit.sh
 _test.py
 *.out
+*.egg-info
+__pycache__
