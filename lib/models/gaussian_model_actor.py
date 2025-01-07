@@ -75,10 +75,10 @@ class GaussianModelActor(GaussianModel):
         time = self.fourier_scale * normalized_frame
 
         idft_base = IDFT(time, self.fourier_dim)[0].cuda()
-        features_dc = self._features_dc # [N, C, 3]
-        features_dc = torch.sum(features_dc * idft_base[..., None], dim=1, keepdim=True) # [N, 1, 3]
-        features_rest = self._features_rest # [N, sh, 3]
-        features = torch.cat([features_dc, features_rest], dim=1) # [N, (sh + 1) * C, 3]
+        features_dc = self._features_dc # [N, C, 3 + d]
+        features_dc = torch.sum(features_dc * idft_base[..., None], dim=1, keepdim=True) # [N, 1, 3 + d]
+        features_rest = self._features_rest # [N, sh, 3 + d]
+        features = torch.cat([features_dc, features_rest], dim=1) # [N, (sh + 1) * C, 3 + d]
         return features
            
     def create_from_pcd(self, spatial_lr_scale):

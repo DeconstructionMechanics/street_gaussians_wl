@@ -26,6 +26,7 @@ class GaussianModel(nn.Module):
         assert self.semantic_mode in ['logits', 'probabilities']
         
         # spherical harmonics
+        self.add_feature_dim = cfg_model.get('add_feature_dim', 0)
         default_max_sh_degree = cfg_model.get('sh_degree')
         if self.model_name == 'background':
             self.max_sh_degree = cfg_model.get('sh_degree_background', default_max_sh_degree)
@@ -56,8 +57,8 @@ class GaussianModel(nn.Module):
         fused_point_cloud = torch.tensor(np.asarray(pcd.points)).float().cuda()
         fused_color = RGB2SH(torch.tensor(np.asarray(pcd.colors)).float().cuda())
         
-        features = torch.zeros((fused_color.shape[0], 3, (self.max_sh_degree + 1) ** 2)).float().cuda()
-        features[..., 0] = fused_color
+        features = torch.zeros((fused_color.shape[0], 3 + self.add_feature_dim, (self.max_sh_degree + 1) ** 2)).float().cuda()
+        features[..., 0] = torch.cat((fused_color, torch.zeros(fused_color.shape[0], self.add_feature_dim).float().cuda()), dim=1)
 
         print(f"Number of points at initialisation for {self.model_name}: ", fused_point_cloud.shape[0])
         dist2 = torch.clamp_min(distCUDA2(torch.from_numpy(np.asarray(pcd.points)).float().cuda()), 0.0000001)
@@ -123,8 +124,8 @@ class GaussianModel(nn.Module):
             features_dc[:, idx] = np.asarray(plydata[attr_name])
         for idx, attr_name in enumerate(extra_f_names):
             features_extra[:, idx] = np.asarray(plydata[attr_name])
-        features_dc = features_dc.reshape(features_dc.shape[0], 3, -1)
-        features_extra = features_extra.reshape(features_extra.shape[0], 3, -1)
+        features_dc = features_dc.reshape(features_dc.shape[0], 3 + self.add_feature_dim, -1)
+        features_extra = features_extra.reshape(features_extra.shape[0], 3 + self.add_feature_dim, -1) # feature +d
        
         scale_names = [p.name for p in plydata.properties if p.name.startswith("scale_")]
         scale_names = sorted(scale_names, key = lambda x: int(x.split('_')[-1]))
@@ -176,8 +177,8 @@ class GaussianModel(nn.Module):
             features_dc[:, idx] = np.asarray(plydata[attr_name])
         for idx, attr_name in enumerate(extra_f_names):
             features_extra[:, idx] = np.asarray(plydata[attr_name])
-        features_dc = features_dc.reshape(features_dc.shape[0], 3, -1)
-        features_extra = features_extra.reshape(features_extra.shape[0], 3, -1)
+        features_dc = features_dc.reshape(features_dc.shape[0], 3 + self.add_feature_dim, -1)
+        features_extra = features_extra.reshape(features_extra.shape[0], 3 + self.add_feature_dim, -1)
        
         scale_names = [p.name for p in plydata.properties if p.name.startswith("scale_")]
         scale_names = sorted(scale_names, key = lambda x: int(x.split('_')[-1]))
@@ -209,7 +210,7 @@ class GaussianModel(nn.Module):
             
     def load_state_dict(self, state_dict):  
         self._xyz = state_dict['xyz']  
-        self._features_dc = state_dict['feature_dc']
+        self._features_dc = state_dict['feature_dc'] # feature +d
         self._features_rest = state_dict['feature_rest']
         self._scaling = state_dict['scaling']
         self._rotation = state_dict['rotation']
@@ -288,7 +289,7 @@ class GaussianModel(nn.Module):
     
     @property
     def get_features(self):
-        features_dc = self._features_dc
+        features_dc = self._features_dc # feature +d
         features_rest = self._features_rest
         return torch.cat((features_dc, features_rest), dim=1)
     

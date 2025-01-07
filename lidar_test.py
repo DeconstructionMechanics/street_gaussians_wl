@@ -1,4 +1,4 @@
-# srun --pty -p v100 --qos v100 --cpus-per-task=8 --gres=gpu:1 python lidar_test.py --config configs/example/waymo_train_002.yaml
+# srun --pty -p a100 --qos a100 --cpus-per-task=8 --gres=gpu:1 python lidar_test.py --config configs/example/waymo_train_002.yaml
 
 import torch
 import numpy as np
@@ -6,6 +6,8 @@ from plyfile import PlyData, PlyElement
 from lib.models.gaussian_model import GaussianModel
 from lib.lidar.gaussian_lidar_renderer import GaussianLidarRenderer as PyRenderer
 from gaussian_lidar_renderer import GaussianLidarRenderer as CUDARenderer
+
+import time
 
 
 path = 'output/waymo_full_exp/waymo_train_002/point_cloud/iteration_50000/point_cloud.ply'
@@ -46,11 +48,13 @@ def render(lidar_position, beams, gaussian, step, method):
         xyz = gaussian.get_xyz[::step]
         opacity = gaussian.get_opacity[::step]
         renderer = PyRenderer()
+        start_time = time.time()
         reflect_points, weights = renderer.render(lidar_positions=[lidar_position], beams=[beams], lidar_ranges=74, covariance=covariance, xyz=xyz, opacity=opacity)
+        render_time = time.time() - start_time
         reflect_points = torch.cat(reflect_points)
         weights = torch.cat(weights)
 
-        return reflect_points, weights
+        return reflect_points, None, weights, render_time  # mask
     
     elif method == 'cuda':
         beams = beams[::1]
@@ -63,28 +67,36 @@ def render(lidar_position, beams, gaussian, step, method):
         rotations = gaussian.get_rotation[::step]
         opacity = gaussian.get_opacity[::step]
 
-        # ray_tracer = RayTracer(means3D, scales, rotations, 10)
-        # trace_visibility_return = ray_tracer.trace_visibility(lidar_position, beams, means3D, symm_inv, opacity, normals)
-        # t_values = trace_visibility_return['tvalue']
-        # weights = trace_visibility_return['visibility']
-        n_contribute, weights, t_values = CUDARenderer.apply(means3D, scales, rotations, opacity, lidar_position, beams)
+        print(torch.min(means3D, dim=0).values, torch.max(means3D, dim=0).values)
+
+        start_time = time.time()
+        n_contribute, weights, t_values = CUDARenderer.apply(means3D, scales, rotations, opacity, lidar_position, beams, 50)
+        render_time = time.time() - start_time
         mask = (t_values.reshape(-1) > 0.1) & (t_values.reshape(-1) < 74) & (weights.reshape(-1) > 0.5)
 
         reflect_points = lidar_position + t_values.repeat(1, 3) * beams
-        reflect_points = reflect_points[mask]
-        weights = weights[mask].reshape(-1)
-        return reflect_points, weights
+        weights = weights.reshape(-1)
+        return reflect_points, mask, weights, render_time
 
 def render_ply(method):
+    print(method)
     with torch.no_grad():
         gaussian = GaussianModel()
         gaussian.load_ply(path)
 
+        frame_arr = np.load(f"npz_file/0.npz", allow_pickle=True)
+
         lidar_position = torch.tensor([60,9,3], dtype=torch.float, device="cuda")
         beams = torch.tensor(np.load('lidar_beams.npy'), dtype=torch.float, device="cuda")
-        reflect_points, weights = render(lidar_position, beams, gaussian, 1, 'cuda')
 
-        print("weights", torch.min(weights).item(), torch.max(weights).item())
+        reflect_points, mask, weights, render_time = render(lidar_position, beams, gaussian, 1, method)
+        try:
+            reflect_points = reflect_points[mask]
+            weights = weights[mask]
+        except:
+            pass
+
+        print(f"lidar render {render_time} seconds         weights {torch.min(weights).item()} {torch.max(weights).item()}")
         weights = (weights - torch.min(weights)) / (torch.max(weights) - torch.min(weights)) * 128 + 128
 
         points_np = reflect_points.cpu().numpy()
@@ -134,5 +146,8 @@ def render_ply(method):
         ply_data = PlyData([vertex_element], text=True)
         ply_data.write(f'output_lidar_{method}/pc_lidar.ply')
 
-render_ply(method='cuda')
-# render_ply(method='py')
+if __name__ == "__main__":
+    render_ply(method='py')
+    for _ in range(1):
+        render_ply(method='cuda')
+    # render_ply(method='py')

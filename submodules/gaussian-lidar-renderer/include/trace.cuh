@@ -47,12 +47,15 @@ trace_bvh_cuda(int32_t num_rays, int32_t* nodes, float* aabbs,
                     float3* means3D, float* covs3D,
                     float* opacities, int32_t* contributes);
 
-void trace_bvh_opacity_cuda(int32_t num_rays, int32_t* nodes, float* aabbs,
+void trace_bvh_opacity_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t* nodes, float* aabbs,
                     float3* rays_o, float3* rays_d,
                     float3* means3D, float* covs3D,
                     float* opacities,
+                    float* shs,
                     int32_t* contributes,
                     float* rendered_opacity,
-                    float* rendered_tvalue);
+                    float* rendered_tvalue,
+                    float* rendered_intensity,
+                    float* rendered_raydrop);
 
 #endif //BVH_TRACE_CUH

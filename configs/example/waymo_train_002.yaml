@@ -3,11 +3,11 @@ source_path: ./data/waymo/training/002
 exp_name: waymo_train_002
 
 data:
-  split_test: -1
-  split_train: 1
+  split_test: 2
+  split_train: 2
   type: Waymo
   white_background: false
-  selected_frames: [98, 198]
+  selected_frames: [0, 198]
   cameras: [0, 1, 2]
   extent: 10
   use_colmap: false
@@ -19,6 +19,7 @@ model:
     fourier_dim: 5
     fourier_scale: 1.
     flip_prob: 0.5
+    add_feature_dim: 2
   nsg:
     include_bkgd: true
     include_obj: true

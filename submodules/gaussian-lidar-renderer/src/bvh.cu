@@ -85,12 +85,13 @@ trace_bvh(const torch::Tensor& nodes, const torch::Tensor& aabbs,
 }
 
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 trace_bvh_opacity(const torch::Tensor& nodes, const torch::Tensor& aabbs,
           const torch::Tensor& rays_o, const torch::Tensor& rays_d,
           const torch::Tensor& means3D, const torch::Tensor& covs3D,
-          const torch::Tensor& opacities){
+          const torch::Tensor& opacities, const torch::Tensor& shs, int32_t sh_degree);{
     int32_t num_rays = rays_o.numel() / rays_o.size(-1);
+    int32_t M = shs.size(1);
     auto rays_o_shape = rays_o.sizes().slice(0, rays_o.dim() - 1);
 //     auto rays_o_shape = rays_o.sizes().vec();
 //     rays_o_shape.pop_back();
@@ -99,10 +100,12 @@ trace_bvh_opacity(const torch::Tensor& nodes, const torch::Tensor& aabbs,
     auto int_opts = rays_o.options().dtype(torch::kInt32);
     auto float_opts = rays_o.options();
     torch::Tensor num_contributes = torch::zeros(rays_o_shape, int_opts);
-    torch::Tensor rendered_opacity = torch::ones(rays_o_shape, float_opts);
+    torch::Tensor rendered_opacity = torch::zeros(rays_o_shape, float_opts);
     torch::Tensor rendered_tvalue = torch::ones(rays_o_shape, float_opts);
+    torch::Tensor rendered_intensity = torch::ones(rays_o_shape, float_opts);
+    torch::Tensor rendered_raydrop = torch::ones(rays_o_shape, float_opts);
 
-    trace_bvh_opacity_cuda(num_rays,
+    trace_bvh_opacity_cuda(num_rays, sh_degree, M,
                    nodes.contiguous().data_ptr<int32_t>(),
                    aabbs.contiguous().data_ptr<float>(),
                    (float3*)rays_o.contiguous().data_ptr<float>(),
@@ -110,10 +113,13 @@ trace_bvh_opacity(const torch::Tensor& nodes, const torch::Tensor& aabbs,
                    (float3*)means3D.contiguous().data_ptr<float>(),
                    covs3D.contiguous().data_ptr<float>(),
                    opacities.contiguous().data_ptr<float>(),
+                   shs.contiguous().data_ptr<float>(),
                    num_contributes.contiguous().data_ptr<int32_t>(),
                    rendered_opacity.contiguous().data_ptr<float>(),
-                   rendered_tvalue.contiguous().data_ptr<float>());
-    return std::make_tuple(num_contributes, rendered_opacity, rendered_tvalue);
+                   rendered_tvalue.contiguous().data_ptr<float>(),
+                   rendered_intensity.contiguous().data_ptr<float>(),
+                   rendered_raydrop.contiguous().data_ptr<float>());
+    return std::make_tuple(num_contributes, rendered_opacity, rendered_tvalue, rendered_intensity, rendered_raydrop);
 }
 
 #endif //BVH_BVH_CU

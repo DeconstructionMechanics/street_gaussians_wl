@@ -4,6 +4,8 @@ from lib.models.street_gaussian_model import StreetGaussianModel
 from lib.utils.camera_utils import Camera, make_rasterizer
 from lib.config import cfg
 
+from gaussian_lidar_renderer import GaussianLidarRenderer
+
 class StreetGaussianRenderer():
     def __init__(
         self,         
@@ -186,20 +188,27 @@ class StreetGaussianRenderer():
         # from SHs in Python, do it. If not, then SH -> RGB conversion will be done by rasterizer.
         shs = None
         colors_precomp = None
+        rgb_feature_map = [True, True, True, False, False]
         if override_color is None:
             if convert_SHs_python:
-                shs_view = pc.get_features.transpose(1, 2).view(-1, 3, (pc.max_sh_degree+1)**2)
-                dir_pp = (pc.get_xyz - viewpoint_camera.camera_center.repeat(pc.get_features.shape[0], 1))
+                shs_view = pc.get_features[:, :,  rgb_feature_map].transpose(1, 2).view(-1, 3, (pc.max_sh_degree+1)**2)
+                dir_pp = (pc.get_xyz - viewpoint_camera.camera_center.repeat(pc.get_features[:, :,  rgb_feature_map].shape[0], 1))
                 dir_pp_normalized = dir_pp / dir_pp.norm(dim=1, keepdim=True)
                 sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
                 colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)
             else:
                 try:
-                    shs = pc.get_features
+                    shs = pc.get_features[:, :,  rgb_feature_map]
                 except:
                     colors_precomp = pc.get_colors(viewpoint_camera.camera_center)
         else:
             colors_precomp = override_color
+
+        print("[street gaussian renderer] pc.get_features ", pc.get_features.shape)
+        if shs is not None:
+            print("[street gaussian renderer] shs ", shs.shape)
+        if colors_precomp is not None:
+            print("[street gaussian renderer] colors_precomp ", colors_precomp.shape)
 
         # TODO: add more feature here
         feature_names = []
@@ -235,7 +244,25 @@ class StreetGaussianRenderer():
             rotations = rotations,
             cov3D_precomp = cov3D_precomp,
             semantics = features,
-        )  
+        )
+
+        lidar_feature_map = [False, False, False, True, True]
+        lidar_sh = pc.get_features[:, :, lidar_feature_map]
+
+        aabb_scale = 20
+        lidar_n_contribute, lidar_weights, lidar_t_values, lidar_intensity, lidar_raydrop = GaussianLidarRenderer.apply(
+            means3D,
+            pc.get_scaling, 
+            pc.get_rotations,
+            opacity,
+            lidar_sh,
+            pc.max_sh_degree,
+            lidar_position,
+            beams,
+            aabb_scale)
+        lidar_mask_rule = (lidar_t_values.reshape(-1) > 0.1) & (lidar_t_values.reshape(-1) < 74) & (lidar_weights.reshape(-1) > 0.5)
+        lidar_mask_raydrop = lidar_raydrop > 0.5
+
         
         if cfg.mode != 'train':
             rendered_color = torch.clamp(rendered_color, 0., 1.)

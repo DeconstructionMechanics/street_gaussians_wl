@@ -11,9 +11,9 @@ trace_bvh(const torch::Tensor& nodes, const torch::Tensor& aabbs,
           const torch::Tensor& means3D, const torch::Tensor& covs3D,
           const torch::Tensor& opacities);
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 trace_bvh_opacity(const torch::Tensor& nodes, const torch::Tensor& aabbs,
           const torch::Tensor& rays_o, const torch::Tensor& rays_d,
           const torch::Tensor& means3D, const torch::Tensor& covs3D,
-          const torch::Tensor& opacities);
+          const torch::Tensor& opacities, const torch::Tensor& shs, int32_t sh_degree);
 #endif //BVH_BVH_H

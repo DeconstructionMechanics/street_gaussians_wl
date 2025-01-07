@@ -27,7 +27,7 @@ except Exception as e:
 
 class GaussianLidarRenderer(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, means3D, scales, rotations, opacity, rays_o, rays_d, aabb_scale: float=10):
+    def forward(ctx, means3D, scales, rotations, opacity, shs, sh_degree, rays_o, rays_d, aabb_scale: float=10):
         P = means3D.shape[0]
         rot = build_rotation(rotations)
         nodes = torch.full((2 * P - 1, 5), -1, device="cuda").int()
@@ -61,13 +61,13 @@ class GaussianLidarRenderer(torch.autograd.Function):
 
         rays_o = rays_o + rays_d * 0.05
         symm_inv = covariance_activation(scales, rotations)
-        cotrib, opa, tvalue = _C.trace_bvh_opacity(tree, aabb, rays_o, rays_d, means3D, symm_inv, opacity)
+        cotrib, opa, tvalue, intensity, raydrop = _C.trace_bvh_opacity(tree, aabb, rays_o, rays_d, means3D, symm_inv, opacity, shs, sh_degree)
 
         n_contribute, weights, tvalues = cotrib.unsqueeze(-1), opa.unsqueeze(-1), tvalue.unsqueeze(-1)
-        return n_contribute, weights, tvalues
+        return n_contribute, weights, tvalues, intensity, raydrop
     
     @staticmethod
-    def backward(ctx, grad_n_contribute, grad_weights, grad_tvalues):
-        grad_means3D, grad_scales, grad_rotations, grad_opacity, grad_rays_o, grad_rays_d, grad_aabb_scale = None, None, None, None, None, None, None
-        return grad_means3D, grad_scales, grad_rotations, grad_opacity, grad_rays_o, grad_rays_d, grad_aabb_scale
+    def backward(ctx, grad_n_contribute, grad_weights, grad_tvalues, grad_intensity, grad_raydrop):
+        grad_means3D, grad_scales, grad_rotations, grad_opacity, grad_shs, grad_sh_degree, grad_rays_o, grad_rays_d, grad_aabb_scale = None, None, None, None, None, None, None, None, None
+        return grad_means3D, grad_scales, grad_rotations, grad_opacity, grad_shs, grad_sh_degree, grad_rays_o, grad_rays_d, grad_aabb_scale
 
