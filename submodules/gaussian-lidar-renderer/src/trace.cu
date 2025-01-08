@@ -302,7 +302,7 @@ void trace_bvh_opacity_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t* nod
     float3* means3D, float* covs3D,
     float* opacities,
     float* shs,
-    int32_t* contributes,
+    int32_t* num_contributes,
     float* rendered_opacity,
     float* rendered_tvalue,
     float* rendered_intensity,
@@ -316,7 +316,7 @@ void trace_bvh_opacity_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t* nod
     thrust::for_each(thrust::device,
         thrust::make_counting_iterator<int32_t>(0),
         thrust::make_counting_iterator<int32_t>(num_rays),
-        [int32_t D, int32_t M, nodes, aabbs_internal, rays_o, rays_d, num_contributes,
+        [D, M, nodes, aabbs_internal, rays_o, rays_d, num_contributes,
         means3D, covs3D, opacities, shs, rendered_opacity, rendered_tvalue, rendered_intensity, rendered_raydrop] __device__(int32_t idx){
         IndexStack<int32_t> stack_device;
         stack_device.push(0);

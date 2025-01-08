@@ -52,7 +52,7 @@ void trace_bvh_opacity_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t* nod
                     float3* means3D, float* covs3D,
                     float* opacities,
                     float* shs,
-                    int32_t* contributes,
+                    int32_t* num_contributes,
                     float* rendered_opacity,
                     float* rendered_tvalue,
                     float* rendered_intensity,

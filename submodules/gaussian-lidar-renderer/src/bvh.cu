@@ -89,7 +89,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 trace_bvh_opacity(const torch::Tensor& nodes, const torch::Tensor& aabbs,
           const torch::Tensor& rays_o, const torch::Tensor& rays_d,
           const torch::Tensor& means3D, const torch::Tensor& covs3D,
-          const torch::Tensor& opacities, const torch::Tensor& shs, int32_t sh_degree);{
+          const torch::Tensor& opacities, const torch::Tensor& shs, int32_t sh_degree){
     int32_t num_rays = rays_o.numel() / rays_o.size(-1);
     int32_t M = shs.size(1);
     auto rays_o_shape = rays_o.sizes().slice(0, rays_o.dim() - 1);

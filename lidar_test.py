@@ -3,8 +3,8 @@
 import torch
 import numpy as np
 from plyfile import PlyData, PlyElement
-from lib.models.gaussian_model import GaussianModel
-from lib.lidar.gaussian_lidar_renderer import GaussianLidarRenderer as PyRenderer
+# from lib.models.gaussian_model import GaussianModel
+# from lib.lidar.gaussian_lidar_renderer import GaussianLidarRenderer as PyRenderer
 from gaussian_lidar_renderer import GaussianLidarRenderer as CUDARenderer
 
 import time
@@ -146,8 +146,81 @@ def render_ply(method):
         ply_data = PlyData([vertex_element], text=True)
         ply_data.write(f'output_lidar_{method}/pc_lidar.ply')
 
+
+
+def save_ply(points_np, weights_np, lidar_position, gaussian_np, ply_path):
+    vertices = np.zeros(points_np.shape[0] + gaussian_np.shape[0] + 1, dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4'), ('red', 'f4'), ('green', 'f4'), ('blue', 'f4')])
+    vertices['x'][:points_np.shape[0]] = points_np[:, 0]
+    vertices['y'][:points_np.shape[0]] = points_np[:, 1]
+    vertices['z'][:points_np.shape[0]] = points_np[:, 2]
+    vertices['red'][:points_np.shape[0]] = weights_np * 255
+    vertices['green'][:points_np.shape[0]] = weights_np * 255
+    vertices['blue'][:points_np.shape[0]] = weights_np * 255
+    vertices['x'][points_np.shape[0]:-1] = gaussian_np[:, 0]
+    vertices['y'][points_np.shape[0]:-1] = gaussian_np[:, 1]
+    vertices['z'][points_np.shape[0]:-1] = gaussian_np[:, 2]
+    vertices['red'][points_np.shape[0]:-1] = 63
+    vertices['green'][points_np.shape[0]:-1] = 63
+    vertices['blue'][points_np.shape[0]:-1] = 255
+    vertices['x'][-1] = lidar_position[0]
+    vertices['y'][-1] = lidar_position[1]
+    vertices['z'][-1] = lidar_position[2]
+    vertices['red'][-1] = 255
+    vertices['green'][-1] = 63
+    vertices['blue'][-1] = 63
+
+    vertex_element = PlyElement.describe(vertices, 'vertex')
+    ply_data = PlyData([vertex_element], text=True)
+    ply_data.write(ply_path)
+
+
+def rand_data_gen(nx = 10, ny = 10, hor_res = torch.pi / 6, ver_res = torch.pi / 12, ver_min = 0.5 * torch.pi, ver_max = 0.8 * torch.pi):
+    means3D = torch.hstack([torch.stack(torch.meshgrid(torch.arange(-(nx // 2), nx // 2 + nx % 2), torch.arange(-(ny // 2), ny // 2 + ny % 2)), dim=2).reshape(-1, 2), torch.zeros((nx * ny, 1))]).to(torch.float).to("cuda")
+    
+    scaling = torch.tensor([1, 1, 0.1]).repeat(nx * ny, 1).to(torch.float).to("cuda")
+    
+    rotations = torch.tensor([1, 0, 0, 0]).repeat(nx * ny, 1).to(torch.float).to("cuda")
+    
+    opacity = torch.ones(nx * ny).to(torch.float).to("cuda")
+    
+    lidar_sh = torch.rand((9, 2)).repeat(nx * ny, 1, 1).to(torch.float).to("cuda")
+    max_sh_degree = 2# 0:1, 1:4, 2:9, 3:16
+    
+    lidar_position = torch.tensor([0,0,2], dtype=torch.float, device="cuda")
+
+    alpha, sigma = torch.meshgrid(torch.arange(0, 2 * torch.pi, hor_res), torch.arange(ver_min, ver_max, ver_res))
+    beams = torch.stack([torch.sin(sigma) * torch.sin(alpha), torch.sin(sigma) * torch.cos(alpha), torch.cos(sigma)], dim=2).reshape(-1, 3).to(torch.float).to("cuda")
+    
+    return means3D, scaling, rotations, opacity, lidar_sh, max_sh_degree, lidar_position, beams
+
+def print_lidar_returns(beams, lidar_n_contribute, lidar_weights, lidar_t_values, lidar_intensity, lidar_raydrop, mask):
+    for beam, n_contribute, weight, t_value, intensity, raydrop, m in zip(beams, lidar_n_contribute, lidar_weights, lidar_t_values, lidar_intensity, lidar_raydrop, mask):
+        print(f"[{m}] beam: {beam} n_contribute: {n_contribute} weight: {weight} t_value: {t_value} intensity: {intensity} raydrop: {raydrop}")
+
+
+def test_lidar_function():
+    means3D, scaling, rotations, opacity, lidar_sh, max_sh_degree, lidar_position, beams = rand_data_gen()
+
+    aabb_scale = 20
+    lidar_n_contribute, lidar_weights, lidar_t_values, lidar_intensity, lidar_raydrop = CUDARenderer.apply(
+        means3D,
+        scaling,
+        rotations,
+        opacity,
+        lidar_sh,
+        max_sh_degree,
+        lidar_position,
+        beams,
+        aabb_scale)
+    lidar_mask_rule = (lidar_t_values.reshape(-1) > 0.1) & (lidar_t_values.reshape(-1) < 74) & (lidar_weights.reshape(-1) > 0.5)
+    lidar_mask_raydrop = lidar_raydrop > 0.5
+    mask = lidar_mask_raydrop
+
+    print_lidar_returns(beams, lidar_n_contribute, lidar_weights, lidar_t_values, lidar_intensity, lidar_raydrop, mask)
+    lidar_pointcloud = lidar_position + lidar_t_values[mask].repeat(1, 3) * beams[mask]
+    lidar_weights = lidar_weights[mask]
+    save_ply(lidar_pointcloud.cpu().numpy(), lidar_weights.cpu().numpy(), lidar_position.cpu().numpy(), means3D.cpu().numpy(), "pc.ply")
+
+
 if __name__ == "__main__":
-    render_ply(method='py')
-    for _ in range(1):
-        render_ply(method='cuda')
-    # render_ply(method='py')
+    test_lidar_function()
