@@ -108,4 +108,37 @@ inline float gaussian_fn(const float3 mean, const float3& pos, const float* cov3
                           2*d.x*d.y*cov3D_inverse[1] + 2*d.x*d.z*cov3D_inverse[2] + 2*d.y*d.z*cov3D_inverse[4]);
     return power;
 }
+
+// Spherical harmonics coefficients
+__device__ const float SH_C0 = 0.28209479177387814f;
+__device__ const float SH_C1 = 0.4886025119029199f;
+__device__ const float SH_C2[] = {
+	1.0925484305920792f,
+	-1.0925484305920792f,
+	0.31539156525252005f,
+	-1.0925484305920792f,
+	0.5462742152960396f
+};
+__device__ const float SH_C3[] = {
+	-0.5900435899266435f,
+	2.890611442640554f,
+	-0.4570457994644658f,
+	0.3731763325901154f,
+	-0.4570457994644658f,
+	1.445305721320277f,
+	-0.5900435899266435f
+};
+
+__forceinline__ __device__ float3 dnormvdv(float3 v, float3 dv)
+{
+	float sum2 = v.x * v.x + v.y * v.y + v.z * v.z;
+	float invsum32 = 1.0f / sqrt(sum2 * sum2 * sum2);
+
+	float3 dnormvdv;
+	dnormvdv.x = ((+sum2 - v.x * v.x) * dv.x - v.y * v.x * dv.y - v.z * v.x * dv.z) * invsum32;
+	dnormvdv.y = (-v.x * v.y * dv.x + (sum2 - v.y * v.y) * dv.y - v.z * v.y * dv.z) * invsum32;
+	dnormvdv.z = (-v.x * v.z * dv.x - v.y * v.z * dv.y + (sum2 - v.z * v.z) * dv.z) * invsum32;
+	return dnormvdv;
+}
+
 #endif //BVH_UTILITY_CUH

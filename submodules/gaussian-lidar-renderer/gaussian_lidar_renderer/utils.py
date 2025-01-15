@@ -52,3 +52,69 @@ def covariance_activation(scales, rotations):
     symm = strip_symmetric(actual_covariance)
     return symm
 
+def covariance_activation_unstrip(scales, rotations):
+    L = build_scaling_rotation(scales, rotations)
+    actual_covariance = L @ L.transpose(1, 2)
+    return actual_covariance
+
+def backward_covariance(grad_cov, scales, rotations):
+    '''backward func covariance_activation_unstrip'''
+
+    # covariance_activation
+    L = build_scaling_rotation(scales, rotations)
+    grad_L = torch.einsum('gab,gbc->gac', grad_cov, L) + torch.einsum('gab,gbc->gac', grad_cov.transpose(1, 2), L)
+
+    # build_scaling_rotation
+    S = torch.zeros((scales.shape[0], 3, 3), dtype=torch.float, device="cuda")
+    R = build_rotation(rotations)
+    S[:, 0, 0] = scales[:, 0]
+    S[:, 1, 1] = scales[:, 1]
+    S[:, 2, 2] = scales[:, 2]
+    grad_R = torch.einsum('gab,gbc->gac', grad_L, S)
+    grad_S = torch.einsum('gab,gbc->gac', R.transpose(1, 2), grad_L)
+    grad_scales = torch.zeros_like(scales)
+    grad_scales[:, 0] = grad_S[:, 0, 0]
+    grad_scales[:, 1] = grad_S[:, 1, 1]
+    grad_scales[:, 2] = grad_S[:, 2, 2]
+
+    # build_rotation
+    grad_rotations_norm = torch.zeros_like(rotations)
+
+    grad_rotations_norm[:, 0] = - 2 * rotations[:, 3] * grad_R[:, 0, 1]\
+                           + 2 * rotations[:, 2] * grad_R[:, 0, 2]\
+                           + 2 * rotations[:, 3] * grad_R[:, 1, 0]\
+                           - 2 * rotations[:, 1] * grad_R[:, 1, 2]\
+                           - 2 * rotations[:, 2] * grad_R[:, 2, 0]\
+                           + 2 * rotations[:, 1] * grad_R[:, 2, 1]
+    
+    grad_rotations_norm[:, 1] = 2 * rotations[:, 2] * grad_R[:, 0, 1]\
+                           + 2 * rotations[:, 3] * grad_R[:, 0, 2]\
+                           + 2 * rotations[:, 2] * grad_R[:, 1, 0]\
+                           - 4 * rotations[:, 1] * grad_R[:, 1, 1]\
+                           - 2 * rotations[:, 0] * grad_R[:, 1, 2]\
+                           + 2 * rotations[:, 3] * grad_R[:, 2, 0]\
+                           + 2 * rotations[:, 0] * grad_R[:, 2, 1]\
+                           - 4 * rotations[:, 1] * grad_R[:, 2, 2]
+                           
+    grad_rotations_norm[:, 2] = - 4 * rotations[:, 2] * grad_R[:, 0, 0]\
+                           + 2 * rotations[:, 1] * grad_R[:, 0, 1]\
+                           + 2 * rotations[:, 0] * grad_R[:, 0, 2]\
+                           + 2 * rotations[:, 1] * grad_R[:, 1, 0]\
+                           + 2 * rotations[:, 3] * grad_R[:, 1, 2]\
+                           - 2 * rotations[:, 0] * grad_R[:, 2, 0]\
+                           + 2 * rotations[:, 3] * grad_R[:, 2, 1]\
+                           - 4 * rotations[:, 2] * grad_R[:, 2, 2]
+                           
+    grad_rotations_norm[:, 3] = - 4 * rotations[:, 3] * grad_R[:, 0, 0]\
+                           - 2 * rotations[:, 0] * grad_R[:, 0, 1]\
+                           + 2 * rotations[:, 1] * grad_R[:, 0, 2]\
+                           + 2 * rotations[:, 0] * grad_R[:, 1, 0]\
+                           - 4 * rotations[:, 3] * grad_R[:, 1, 1]\
+                           + 2 * rotations[:, 2] * grad_R[:, 1, 2]\
+                           + 2 * rotations[:, 1] * grad_R[:, 2, 0]\
+                           + 2 * rotations[:, 2] * grad_R[:, 2, 1]
+
+    norm = torch.sqrt(rotations[:, 0] * rotations[:, 0] + rotations[:, 1] * rotations[:, 1] + rotations[:, 2] * rotations[:, 2] + rotations[:, 3] * rotations[:, 3])
+    grad_rotations = (-1 * rotations * torch.sum(rotations * grad_rotations_norm, dim=1).unsqueeze(-1)) / (norm.unsqueeze(-1) ** 3) + grad_rotations_norm / norm.unsqueeze(-1)
+    
+    return grad_scales, grad_rotations

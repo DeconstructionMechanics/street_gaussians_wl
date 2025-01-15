@@ -10,4 +10,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("create_bvh", &create_bvh);
     m.def("trace_bvh", &trace_bvh);
     m.def("trace_bvh_opacity", &trace_bvh_opacity);
+    m.def("backward_shs", &backward_shs);
 }

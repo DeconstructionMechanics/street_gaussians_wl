@@ -14,6 +14,7 @@ setup(
                 'bvh.cu',
                 'trace.cu',
                 'construct.cu',
+                'backward.cu',
                 'bindings.cpp',
             ]],
             include_dirs=[

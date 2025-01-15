@@ -4,6 +4,7 @@
 #include "bvh.h"
 #include "construct.cuh"
 #include "trace.cuh"
+#include "backward.cuh"
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
 create_bvh(const torch::Tensor& means3D, const torch::Tensor& scales, const torch::Tensor& rotations, const torch::Tensor& nodes, const torch::Tensor& aabbs){
@@ -120,6 +121,37 @@ trace_bvh_opacity(const torch::Tensor& nodes, const torch::Tensor& aabbs,
                    rendered_intensity.contiguous().data_ptr<float>(),
                    rendered_raydrop.contiguous().data_ptr<float>());
     return std::make_tuple(num_contributes, rendered_opacity, rendered_tvalue, rendered_intensity, rendered_raydrop);
+}
+
+
+std::tuple<torch::Tensor, torch::Tensor>
+backward_shs(const torch::Tensor& contribute_gid, const torch::Tensor& contribute_clamp,
+          const torch::Tensor& grad_intensityprime, const torch::Tensor& grad_raydropprime,
+          const torch::Tensor& rays_o, const torch::Tensor& rays_d,
+          const torch::Tensor& means3D,
+          const torch::Tensor& shs, int32_t sh_degree){
+    int32_t num_rays = rays_o.numel() / rays_o.size(-1);
+    int32_t M = shs.size(1);
+    int32_t G = contribute_gid.size(1);
+
+    auto int_opts = rays_o.options().dtype(torch::kInt32);
+    auto float_opts = rays_o.options();
+    
+    torch::Tensor grad_shs_from_shs = torch::zeros(shs.sizes(), float_opts);
+    torch::Tensor grad_means_from_shs = torch::zeros(means3D.sizes(), float_opts);
+
+    backward_shs_cuda(num_rays, sh_degree, M, G,
+                   contribute_gid.contiguous().data_ptr<int32_t>(),
+                   contribute_clamp.contiguous().data_ptr<bool>(),
+                   grad_intensityprime.contiguous().data_ptr<float>(),
+                   grad_raydropprime.contiguous().data_ptr<float>(),
+                   (float3*)rays_o.contiguous().data_ptr<float>(),
+                   (float3*)rays_d.contiguous().data_ptr<float>(),
+                   (float3*)means3D.contiguous().data_ptr<float>(),
+                   shs.contiguous().data_ptr<float>(),
+                   grad_shs_from_shs.contiguous().data_ptr<float>(),
+                   grad_means_from_shs.contiguous().data_ptr<float>());
+    return std::make_tuple(grad_shs_from_shs, grad_means_from_shs);
 }
 
 #endif //BVH_BVH_CU
