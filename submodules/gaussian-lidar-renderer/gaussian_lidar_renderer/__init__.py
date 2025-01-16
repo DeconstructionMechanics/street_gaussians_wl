@@ -73,14 +73,18 @@ class GaussianLidarRenderer(torch.autograd.Function):
     
     @staticmethod
     def backward(ctx, grad_n_contribute, grad_weights, grad_tvalues, grad_intensity, grad_raydrop):
-        grad_means3D, grad_scales, grad_rotations, grad_opacity, grad_shs, grad_sh_degree, grad_rays_o, grad_rays_d, grad_aabb_scale = None, None, None, None, None, None, None, None, None
         contribute_gid, contribute_T, contribute_clamp, weights, means3D, scales, rotations, opacity, shs, sh_degree, rays_o, rays_d = ctx.saved_tensors
         '''
         contribute_gid: (n_ray, n_gaussian), contributed gaussian index, int, -1 means gaussian not exist
         contribute_T: (n_ray, n_gaussian), remaining opacity, float, 0 means gaussian not exist
-        '''
-        grad_shs = torch.zeros_like(shs)
+        contribute_clamp: (n_ray, n_gaussian), clamp value, bool
+        ''' 
         grad_means3D = torch.zeros_like(means3D)
+        grad_scales = torch.zeros_like(scales)
+        grad_rotations = torch.zeros_like(rotations)
+        grad_opacity = torch.zeros_like(opacity)
+        grad_shs = torch.zeros_like(shs)
+        grad_sh_degree, grad_rays_o, grad_rays_d, grad_aabb_scale = None, None, None, None
         
         # grad outputs from alpha-blending
         diff_params =  contribute_T * opacity[contribute_gid] # (T_i * alpha_i)
@@ -107,7 +111,9 @@ class GaussianLidarRenderer(torch.autograd.Function):
         grad_cov_from_tprime = torch.einsum('rga,rb,rg->rgab', (ray_mu / raysd_sigma_raysd.unsqueeze(-1) - (torch.einsum('rga,rga->rg', ray_mu, sigma_raysd) / (raysd_sigma_raysd ** 2)).unsqueeze(-1) * rays_d.unsqueeze(1)), rays_d, grad_tprime)
         grad_cov = torch.zeros(grad_means3D.shape[0], 3, 3, device='cuda').float()
         grad_cov.index_add_(0, torch.max(torch.tensor(0), contribute_gid.flatten()), grad_cov_from_tprime.reshape(-1, 3, 3))
-        grad_scales, grad_rotations = backward_covariance(grad_cov, scales, rotations)
+        grad_scales_from_tprime, grad_rotations_from_tprime = backward_covariance(grad_cov, scales, rotations)
+        grad_scales += grad_scales_from_tprime
+        grad_rotations += grad_rotations_from_tprime
 
         # grad opacity
 

@@ -115,6 +115,6 @@ def backward_covariance(grad_cov, scales, rotations):
                            + 2 * rotations[:, 2] * grad_R[:, 2, 1]
 
     norm = torch.sqrt(rotations[:, 0] * rotations[:, 0] + rotations[:, 1] * rotations[:, 1] + rotations[:, 2] * rotations[:, 2] + rotations[:, 3] * rotations[:, 3])
-    grad_rotations = (-1 * rotations * torch.sum(rotations * grad_rotations_norm, dim=1).unsqueeze(-1)) / (norm.unsqueeze(-1) ** 3) + grad_rotations_norm / norm.unsqueeze(-1)
+    grad_rotations = (-1 * rotations * torch.sum(rotations * grad_rotations_norm, dim=1).unsqueeze(-1)) / (norm.unsqueeze(-1) ** 3) + grad_rotations_norm / norm.unsqueeze(-1) # bit different with torch autograd
     
     return grad_scales, grad_rotations
