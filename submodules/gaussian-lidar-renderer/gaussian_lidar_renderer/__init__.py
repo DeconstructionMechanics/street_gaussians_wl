@@ -87,7 +87,7 @@ class GaussianLidarRenderer(torch.autograd.Function):
         grad_sh_degree, grad_rays_o, grad_rays_d, grad_aabb_scale = None, None, None, None
         
         # grad outputs from alpha-blending
-        diff_params =  contribute_T * opacity[contribute_gid] # (T_i * alpha_i)
+        diff_params = contribute_T * opacity[contribute_gid] # (T_i * alpha_i) opacity?
         diff_params[contribute_gid < 0] = 0
         diff_tprime = diff_params / torch.max(weights.reshape(-1, 1), torch.tensor(0.00001)) # (T_i * alpha_i) / (weight)
         grad_tprime = diff_tprime * grad_tvalues.reshape(-1, 1)
@@ -103,7 +103,7 @@ class GaussianLidarRenderer(torch.autograd.Function):
         symm_inv_mat = covariance_activation_unstrip(scales, rotations)
         sigma_raysd = torch.einsum('rgab,rb->rga', symm_inv_mat[contribute_gid], rays_d)
         raysd_sigma_raysd = torch.einsum('ra,rga->rg', rays_d, sigma_raysd)
-        grad_means_from_tprime = sigma_raysd / (raysd_sigma_raysd * grad_tprime).unsqueeze(-1)
+        grad_means_from_tprime = sigma_raysd / (raysd_sigma_raysd * grad_tprime).unsqueeze(-1) # ？
         grad_means3D.index_add_(0, torch.max(torch.tensor(0), contribute_gid.flatten()), grad_means_from_tprime.reshape(-1, 3))
         
         # grad cov

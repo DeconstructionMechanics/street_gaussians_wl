@@ -250,6 +250,7 @@ void backward_shs_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t G,
     }); 
 }
 
+#define DELTA 0.0001f
 
 void backward_trace_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t G,
     int32_t* contribute_gid, float* contribute_T, bool* contribute_clamp,
@@ -259,6 +260,7 @@ void backward_trace_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t G,
 	float3* rays_o, float3* rays_d,
 	float* grad_up_weights, float* grad_up_tvalues, float* grad_up_intensity, float* grad_up_raydrop,
 	float3* grad_means3D, float* grad_covs3D, float* grad_opacity, float2* grad_shs){
+		// contribute_gid (num_rays, G), G sorted by depth
 		// covs3D stripped to 6
     thrust::for_each(thrust::device,
         thrust::make_counting_iterator<int32_t>(0),
@@ -272,9 +274,12 @@ void backward_trace_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t G,
 		grad_up_weights, grad_up_tvalues, grad_up_intensity, grad_up_raydrop,
 		grad_means3D, grad_covs3D, grad_opacity, grad_shs] __device__(int32_t ray_idx){
         
+		float ray_weight = weights[ray_idx];
+		float ray_tvalue = tvalues[ray_idx];
+		float ray_intensity = intensity[ray_idx];
+		float ray_raydrop = raydrop[ray_idx];
         float3 ray_o = rays_o[ray_idx];
 		float3 ray_d = rays_d[ray_idx];
-		float ray_weight = weights[ray_idx];
 		float ray_grad_up_tvalue = grad_up_tvalues[ray_idx];
 		float ray_grad_up_intensity = grad_up_intensity[ray_idx];
 		float ray_grad_up_raydrop = grad_up_raydrop[ray_idx];
@@ -289,26 +294,81 @@ void backward_trace_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t G,
 			float tprime = *(contribute_tprime + idx * G + iG);
 			float intensityprime = *(contribute_intensityprime + idx * G + iG);
 			float raydropprime = *(contribute_raydropprime + idx * G + iG);
+			float* covs3D_ptr = covs3D + gaussian_idx * 6;
+			float* grad_covs3D_ptr = grad_covs3D + gaussian_idx * 6;
 
 			float3 pos = {
 							ray_o.x + tprime * ray_d.x,
 							ray_o.y + tprime * ray_d.y,
 							ray_o.z + tprime * ray_d.z,
 			};
-			float power = gaussian_fn(means3D[gaussian_idx], pos, covs3D + gaussian_idx * 6);
-			float alpha = opacity[gaussian_idx] * __expf(power);
+			float alpha = opacity[gaussian_idx] * __expf(gaussian_fn(means3D[gaussian_idx], pos, covs3D_ptr));
 
 			// feature -> featureprime
 			float dfeature_dfeatureprime = T * alpha;
-			float grad_tprime = dfeature_dfeatureprime * ray_grad_up_tvalue / fmaxf(ray_weight, 0.0001f);
+			float grad_tprime = dfeature_dfeatureprime * ray_grad_up_tvalue / fmaxf(ray_weight, DELTA);
 			float grad_intensityprime = dfeature_dfeatureprime * ray_grad_up_intensity;
 			float grad_raydropprime = dfeature_dfeatureprime * ray_grad_up_raydrop;
 
 			// tprime -> means3D
+			float3 sigma_rd = {
+				covs3D_ptr[0] * ray_d.x + covs3D_ptr[1] * ray_d.y + covs3D_ptr[2] * ray_d.z,
+				covs3D_ptr[1] * ray_d.x + covs3D_ptr[3] * ray_d.y + covs3D_ptr[4] * ray_d.z,
+				covs3D_ptr[2] * ray_d.x + covs3D_ptr[4] * ray_d.y + covs3D_ptr[5] * ray_d.z,
+			};
+			float rd_sigma_rd = ray_d.x * sigma_rd.x + ray_d.y * sigma_rd.y + ray_d.z * sigma_rd.z;
+			grad_means3D[gaussian_idx] += {
+				sigma_rd.x * grad_tprime / rd_sigma_rd,
+				sigma_rd.y * grad_tprime / rd_sigma_rd,
+				sigma_rd.z * grad_tprime / rd_sigma_rd,
+			};
 
 			// tprime -> covs3D
+			float3 miu = {means3D[gaussian_idx].x - ray_o.x, means3D[gaussian_idx].y - ray_o.y, means3D[gaussian_idx].z - ray_o.z};
+			float miu_sigma_rd = miu.x * sigma_rd.x + miu.y * sigma_rd.y + miu.z * sigma_rd.z;
+			grad_covs3D_ptr[0] = (miu.x * ray_d.x * rd_sigma_rd - miu_sigma_rd * ray_d.x * ray_d.x) / (rd_sigma_rd * rd_sigma_rd) * grad_tprime;
+			grad_covs3D_ptr[1] = ((miu.x * ray_d.y + miu.y * ray_d.x) * rd_sigma_rd - 2 * miu_sigma_rd * ray_d.x * ray_d.y) / (rd_sigma_rd * rd_sigma_rd) * grad_tprime;
+			grad_covs3D_ptr[2] = ((miu.x * ray_d.z + miu.z * ray_d.x) * rd_sigma_rd - 2 * miu_sigma_rd * ray_d.x * ray_d.z) / (rd_sigma_rd * rd_sigma_rd) * grad_tprime;
+			grad_covs3D_ptr[3] = (miu.y * ray_d.y * rd_sigma_rd - miu_sigma_rd * ray_d.y * ray_d.y) / (rd_sigma_rd * rd_sigma_rd) * grad_tprime;
+			grad_covs3D_ptr[4] = ((miu.y * ray_d.z + miu.z * ray_d.y) * rd_sigma_rd - 2 * miu_sigma_rd * ray_d.y * ray_d.z) / (rd_sigma_rd * rd_sigma_rd) * grad_tprime;
+			grad_covs3D_ptr[5] = (miu.z * ray_d.z * rd_sigma_rd - miu_sigma_rd * ray_d.z * ray_d.z) / (rd_sigma_rd * rd_sigma_rd) * grad_tprime;
+			
+			// feature -> alpha
+			float dtfeature_dalpha = T * tprime;
+			float dintensity_dalpha = T * intensityprime;
+			float draydrop_dalpha = T * raydropprime;
+			float dposttfeature_dalpha = 0;
+			float dpostintensity_dalpha = 0;
+			float dpostraydrop_dalpha = 0;
+			for (int32_t iG2 = 0; iG2 < G; iG2++){
+				int32_t gaussian_idx2 = *(contribute_gid + idx * G + iG2);
+				if (gaussian_idx2 < 0){
+					continue;
+				}
+				float T2 = *(contribute_T + idx * G + iG2);
+				float tprime2 = *(contribute_tprime + idx * G + iG2);
+				float intensityprime2 = *(contribute_intensityprime + idx * G + iG2);
+				float raydropprime2 = *(contribute_raydropprime + idx * G + iG2);
+				float* covs3D_ptr2 = covs3D + gaussian_idx2 * 6;
+				float3 pos2 = {
+					ray_o.x + tprime2 * ray_d.x,
+					ray_o.y + tprime2 * ray_d.y,
+					ray_o.z + tprime2 * ray_d.z,
+				};
+				float alpha2 = opacity[gaussian_idx2] * __expf(gaussian_fn(means3D[gaussian_idx2], pos2, covs3D_ptr2));
+				dposttfeature_dalpha -= T2 * alpha2 * tprime2;
+				dpostintensity_dalpha -= T2 * alpha2 * intensityprime2;
+				dpostraydrop_dalpha -= T2 * alpha2 * raydropprime2;
+			}
+			dtfeature_dalpha += dposttfeature_dalpha / fmaxf((1 - alpha), DELTA);
+			dintensity_dalpha += dpostintensity_dalpha / fmaxf((1 - alpha), DELTA);
+			draydrop_dalpha += dpostraydrop_dalpha / fmaxf((1 - alpha), DELTA);
 
-			// opacity
+			float dtvalue_dalpha = (dtfeature_dalpha - ray_tvalue * (1 - ray_weight) / fmaxf((1 - alpha), DELTA)) / fmaxf(ray_weight, DELTA);
+			float grad_alpha = dtvalue_dalpha * ray_grad_up_tvalue + dintensity_dalpha * ray_grad_up_intensity + draydrop_dalpha * ray_grad_up_raydrop;
+
+			// alpha -> opacity, means3D, covs3D
+
 
 			// featureprime -> sh
             float2 grad_feature = {grad_intensityprime, grad_raydropprime};

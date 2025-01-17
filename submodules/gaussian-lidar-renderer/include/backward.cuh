@@ -1,6 +1,5 @@
 #ifndef BACKWARD_H
 #define BACKWARD_H
-#include <torch/extension.h>
 #include <cstdint>
 #include <thrust/swap.h>
 #include <thrust/pair.h>
