@@ -302,37 +302,9 @@ void backward_trace_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t G,
 							ray_o.y + tprime * ray_d.y,
 							ray_o.z + tprime * ray_d.z,
 			};
-			float alpha = opacity[gaussian_idx] * __expf(gaussian_fn(means3D[gaussian_idx], pos, covs3D_ptr));
+			float exp_power = __expf(gaussian_fn(means3D[gaussian_idx], pos, covs3D_ptr))
+			float alpha = opacity[gaussian_idx] * exp_power;
 
-			// feature -> featureprime
-			float dfeature_dfeatureprime = T * alpha;
-			float grad_tprime = dfeature_dfeatureprime * ray_grad_up_tvalue / fmaxf(ray_weight, DELTA);
-			float grad_intensityprime = dfeature_dfeatureprime * ray_grad_up_intensity;
-			float grad_raydropprime = dfeature_dfeatureprime * ray_grad_up_raydrop;
-
-			// tprime -> means3D
-			float3 sigma_rd = {
-				covs3D_ptr[0] * ray_d.x + covs3D_ptr[1] * ray_d.y + covs3D_ptr[2] * ray_d.z,
-				covs3D_ptr[1] * ray_d.x + covs3D_ptr[3] * ray_d.y + covs3D_ptr[4] * ray_d.z,
-				covs3D_ptr[2] * ray_d.x + covs3D_ptr[4] * ray_d.y + covs3D_ptr[5] * ray_d.z,
-			};
-			float rd_sigma_rd = ray_d.x * sigma_rd.x + ray_d.y * sigma_rd.y + ray_d.z * sigma_rd.z;
-			grad_means3D[gaussian_idx] += {
-				sigma_rd.x * grad_tprime / rd_sigma_rd,
-				sigma_rd.y * grad_tprime / rd_sigma_rd,
-				sigma_rd.z * grad_tprime / rd_sigma_rd,
-			};
-
-			// tprime -> covs3D
-			float3 miu = {means3D[gaussian_idx].x - ray_o.x, means3D[gaussian_idx].y - ray_o.y, means3D[gaussian_idx].z - ray_o.z};
-			float miu_sigma_rd = miu.x * sigma_rd.x + miu.y * sigma_rd.y + miu.z * sigma_rd.z;
-			grad_covs3D_ptr[0] = (miu.x * ray_d.x * rd_sigma_rd - miu_sigma_rd * ray_d.x * ray_d.x) / (rd_sigma_rd * rd_sigma_rd) * grad_tprime;
-			grad_covs3D_ptr[1] = ((miu.x * ray_d.y + miu.y * ray_d.x) * rd_sigma_rd - 2 * miu_sigma_rd * ray_d.x * ray_d.y) / (rd_sigma_rd * rd_sigma_rd) * grad_tprime;
-			grad_covs3D_ptr[2] = ((miu.x * ray_d.z + miu.z * ray_d.x) * rd_sigma_rd - 2 * miu_sigma_rd * ray_d.x * ray_d.z) / (rd_sigma_rd * rd_sigma_rd) * grad_tprime;
-			grad_covs3D_ptr[3] = (miu.y * ray_d.y * rd_sigma_rd - miu_sigma_rd * ray_d.y * ray_d.y) / (rd_sigma_rd * rd_sigma_rd) * grad_tprime;
-			grad_covs3D_ptr[4] = ((miu.y * ray_d.z + miu.z * ray_d.y) * rd_sigma_rd - 2 * miu_sigma_rd * ray_d.y * ray_d.z) / (rd_sigma_rd * rd_sigma_rd) * grad_tprime;
-			grad_covs3D_ptr[5] = (miu.z * ray_d.z * rd_sigma_rd - miu_sigma_rd * ray_d.z * ray_d.z) / (rd_sigma_rd * rd_sigma_rd) * grad_tprime;
-			
 			// feature -> alpha
 			float dtfeature_dalpha = T * tprime;
 			float dintensity_dalpha = T * intensityprime;
@@ -368,7 +340,52 @@ void backward_trace_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t G,
 			float grad_alpha = dtvalue_dalpha * ray_grad_up_tvalue + dintensity_dalpha * ray_grad_up_intensity + draydrop_dalpha * ray_grad_up_raydrop;
 
 			// alpha -> opacity, means3D, covs3D
+			grad_opacity[gaussian_idx] +=  exp_power * grad_alpha;
+			float grad_power = grad_alpha;
+			float3 d = {means3D[gaussian_idx].x - pos.x, means3D[gaussian_idx].y - pos.y, means3D[gaussian_idx].z - pos.z};
+			grad_covs3D_ptr[0] += -0.5 * d.x * d.x * grad_power;
+			grad_covs3D_ptr[1] += -1 * d.x * d.y * grad_power;
+			grad_covs3D_ptr[2] += -1 * d.x * d.z * grad_power;
+			grad_covs3D_ptr[3] += -0.5 * d.y * d.y * grad_power;
+			grad_covs3D_ptr[4] += -1 * d.y * d.z * grad_power;
+			grad_covs3D_ptr[5] += -0.5 * d.z * d.z * grad_power;
+			float3 grad_d = {
+				-1 * (covs3D_ptr[0] * d.x + covs3D_ptr[1] * d.y + covs3D_ptr[2] * d.z) * grad_power,
+				-1 * (covs3D_ptr[1] * d.x + covs3D_ptr[3] * d.y + covs3D_ptr[4] * d.z) * grad_power,
+				-1 * (covs3D_ptr[2] * d.x + covs3D_ptr[4] * d.y + covs3D_ptr[5] * d.z) * grad_power,
+			};
+			grad_means3D[gaussian_idx] += grad_d;
+			float grad_tprime = -1 * (ray_d.x * grad_d.x + ray_d.y * grad_d.y + ray_d.z * grad_d.z);
 
+			// feature -> featureprime
+			float dfeature_dfeatureprime = T * alpha;
+			grad_tprime += dfeature_dfeatureprime * ray_grad_up_tvalue / fmaxf(ray_weight, DELTA);
+			float grad_intensityprime = dfeature_dfeatureprime * ray_grad_up_intensity;
+			float grad_raydropprime = dfeature_dfeatureprime * ray_grad_up_raydrop;
+
+
+			// tprime -> means3D
+			float3 sigma_rd = {
+				covs3D_ptr[0] * ray_d.x + covs3D_ptr[1] * ray_d.y + covs3D_ptr[2] * ray_d.z,
+				covs3D_ptr[1] * ray_d.x + covs3D_ptr[3] * ray_d.y + covs3D_ptr[4] * ray_d.z,
+				covs3D_ptr[2] * ray_d.x + covs3D_ptr[4] * ray_d.y + covs3D_ptr[5] * ray_d.z,
+			};
+			float rd_sigma_rd = ray_d.x * sigma_rd.x + ray_d.y * sigma_rd.y + ray_d.z * sigma_rd.z;
+			grad_means3D[gaussian_idx] += {
+				sigma_rd.x * grad_tprime / rd_sigma_rd,
+				sigma_rd.y * grad_tprime / rd_sigma_rd,
+				sigma_rd.z * grad_tprime / rd_sigma_rd,
+			};
+
+			// tprime -> covs3D
+			float3 miu = {means3D[gaussian_idx].x - ray_o.x, means3D[gaussian_idx].y - ray_o.y, means3D[gaussian_idx].z - ray_o.z};
+			float miu_sigma_rd = miu.x * sigma_rd.x + miu.y * sigma_rd.y + miu.z * sigma_rd.z;
+			grad_covs3D_ptr[0] = (miu.x * ray_d.x * rd_sigma_rd - miu_sigma_rd * ray_d.x * ray_d.x) / (rd_sigma_rd * rd_sigma_rd) * grad_tprime;
+			grad_covs3D_ptr[1] = ((miu.x * ray_d.y + miu.y * ray_d.x) * rd_sigma_rd - 2 * miu_sigma_rd * ray_d.x * ray_d.y) / (rd_sigma_rd * rd_sigma_rd) * grad_tprime;
+			grad_covs3D_ptr[2] = ((miu.x * ray_d.z + miu.z * ray_d.x) * rd_sigma_rd - 2 * miu_sigma_rd * ray_d.x * ray_d.z) / (rd_sigma_rd * rd_sigma_rd) * grad_tprime;
+			grad_covs3D_ptr[3] = (miu.y * ray_d.y * rd_sigma_rd - miu_sigma_rd * ray_d.y * ray_d.y) / (rd_sigma_rd * rd_sigma_rd) * grad_tprime;
+			grad_covs3D_ptr[4] = ((miu.y * ray_d.z + miu.z * ray_d.y) * rd_sigma_rd - 2 * miu_sigma_rd * ray_d.y * ray_d.z) / (rd_sigma_rd * rd_sigma_rd) * grad_tprime;
+			grad_covs3D_ptr[5] = (miu.z * ray_d.z * rd_sigma_rd - miu_sigma_rd * ray_d.z * ray_d.z) / (rd_sigma_rd * rd_sigma_rd) * grad_tprime;
 
 			// featureprime -> sh
             float2 grad_feature = {grad_intensityprime, grad_raydropprime};
