@@ -52,13 +52,28 @@ def covariance_activation(scales, rotations):
     symm = strip_symmetric(actual_covariance)
     return symm
 
-def covariance_activation_unstrip(scales, rotations):
-    L = build_scaling_rotation(scales, rotations)
-    actual_covariance = L @ L.transpose(1, 2)
-    return actual_covariance
+# def covariance_activation_unstrip(scales, rotations):
+#     L = build_scaling_rotation(scales, rotations)
+#     actual_covariance = L @ L.transpose(1, 2)
+#     return actual_covariance
 
-def backward_covariance(grad_cov, scales, rotations):
-    '''backward func covariance_activation_unstrip'''
+def backward_covariance(grad_cov_stripped, scales, rotations):
+    '''
+    backward func covariance_activation
+    grad_cov_stripped: shape 6
+    '''
+
+    # strip_symmetric
+    grad_cov = torch.zeros((grad_cov_stripped.shape[0], 3, 3), dtype=torch.float, device="cuda")
+    grad_cov[:, 0, 0] = grad_cov_stripped[:, 0]
+    grad_cov[:, 0, 1] = grad_cov_stripped[:, 1]
+    grad_cov[:, 0, 2] = grad_cov_stripped[:, 2]
+    grad_cov[:, 1, 0] = 0 # grad_cov_stripped[:, 1]
+    grad_cov[:, 1, 1] = grad_cov_stripped[:, 3]
+    grad_cov[:, 1, 2] = grad_cov_stripped[:, 4]
+    grad_cov[:, 2, 0] = 0 # grad_cov_stripped[:, 2]
+    grad_cov[:, 2, 1] = 0 # grad_cov_stripped[:, 4]
+    grad_cov[:, 2, 2] = grad_cov_stripped[:, 5]
 
     # covariance_activation
     L = build_scaling_rotation(scales, rotations)

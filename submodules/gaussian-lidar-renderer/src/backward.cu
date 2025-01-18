@@ -2,7 +2,7 @@
 
 // Backward pass for conversion of spherical harmonics to feature for
 // each Gaussian.
-__device__ void computeFeaturesFromSHBackward(int idx, int deg, int max_coeffs, const float3* means, float3 campos, const float* shs, const bool clamped, float2 dL_dfeature, float3* dL_dmeans, float2* dL_dshs)
+__device__ void computeFeaturesFromSHBackward(int idx, int deg, int max_coeffs, const float3* means, float3 campos, const float* shs, const bool* clamped, float2 dL_dfeature, float3* dL_dmeans, float2* dL_dshs)
 {
 	// Compute intermediate values, as it is done during forward
 	// accumulate(plus) gradients
@@ -25,8 +25,8 @@ __device__ void computeFeaturesFromSHBackward(int idx, int deg, int max_coeffs, 
 	// Use PyTorch rule for clamping: if clamping was applied,
 	// gradient becomes 0.
 	// float2 dL_dfeature = dL_dfeatures[idx];
-	dL_dfeature.x *= clamped ? 0 : 1;
-	dL_dfeature.y *= clamped ? 0 : 1;
+	dL_dfeature.x *= clamped[0] ? 0 : 1;
+	dL_dfeature.y *= clamped[1] ? 0 : 1;
 	
 	float2 dfeaturedx(0, 0);
 	float2 dfeaturedy(0, 0);
@@ -223,32 +223,32 @@ __device__ void computeFeaturesFromSHBackward(int idx, int deg, int max_coeffs, 
 
 
 
-void backward_shs_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t G,
-    int32_t* contribute_gid, bool* contribute_clamp,
-    float* grad_intensityprime, float* grad_raydropprime,
-    float3* rays_o, float3* rays_d,
-    float3* means3D,
-    float* shs,
-    float* grad_shs_from_shs,
-    float* grad_means_from_shs){
-    thrust::for_each(thrust::device,
-        thrust::make_counting_iterator<int32_t>(0),
-        thrust::make_counting_iterator<int32_t>(num_rays),
-        [D, M, contribute_gid, contribute_clamp, grad_intensityprime, grad_raydropprime, rays_o, rays_d,
-        means3D, shs, grad_shs_from_shs, grad_means_from_shs] __device__(int32_t idx){
+// void backward_shs_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t G,
+//     int32_t* contribute_gid, bool* contribute_clamp,
+//     float* grad_intensityprime, float* grad_raydropprime,
+//     float3* rays_o, float3* rays_d,
+//     float3* means3D,
+//     float* shs,
+//     float* grad_shs_from_shs,
+//     float* grad_means_from_shs){
+//     thrust::for_each(thrust::device,
+//         thrust::make_counting_iterator<int32_t>(0),
+//         thrust::make_counting_iterator<int32_t>(num_rays),
+//         [D, M, contribute_gid, contribute_clamp, grad_intensityprime, grad_raydropprime, rays_o, rays_d,
+//         means3D, shs, grad_shs_from_shs, grad_means_from_shs] __device__(int32_t idx){
         
-        float3 ray_o = rays_o[idx], ray_d = rays_d[idx];
-        for (int32_t iG = 0; iG < G; iG++){
-            int32_t gaussian_idx = *(contribute_gid + idx * G + iG);
-            if (gaussian_idx < 0){
-                continue;
-            }
-            bool clamped = *(contribute_clamp + idx * G + iG);
-            float2 dL_dfeature = {*(grad_intensityprime + idx * G + iG), *(grad_raydropprime + idx * G + iG)};
-            computeFeaturesFromSHBackward(gaussian_idx, D, M, (float3*)means3D, ray_o, shs, clamped, dL_dfeature, (float3*)grad_means_from_shs, (float2*)grad_shs_from_shs);
-        }
-    }); 
-}
+//         float3 ray_o = rays_o[idx], ray_d = rays_d[idx];
+//         for (int32_t iG = 0; iG < G; iG++){
+//             int32_t gaussian_idx = *(contribute_gid + idx * G + iG);
+//             if (gaussian_idx < 0){
+//                 continue;
+//             }
+//             bool clamped = *(contribute_clamp + idx * G + iG);
+//             float2 dL_dfeature = {*(grad_intensityprime + idx * G + iG), *(grad_raydropprime + idx * G + iG)};
+//             computeFeaturesFromSHBackward(gaussian_idx, D, M, (float3*)means3D, ray_o, shs, clamped, dL_dfeature, (float3*)grad_means_from_shs, (float2*)grad_shs_from_shs);
+//         }
+//     }); 
+// }
 
 #define DELTA 0.0001f
 
@@ -290,7 +290,7 @@ void backward_trace_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t G,
                 continue;
             }
 			float T = *(contribute_T + idx * G + iG);
-            bool clamp = *(contribute_clamp + idx * G + iG);
+            bool* clamp = contribute_clamp +  2 * (idx * G + iG);
 			float tprime = *(contribute_tprime + idx * G + iG);
 			float intensityprime = *(contribute_intensityprime + idx * G + iG);
 			float raydropprime = *(contribute_raydropprime + idx * G + iG);

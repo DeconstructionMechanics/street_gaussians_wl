@@ -7,7 +7,7 @@ struct id_intersection{
 
 
 
-__device__ float2 computeFeaturesFromSH(int idx, int deg, int max_coeffs, const float3* means, float3 campos, const float* shs)
+__device__ float2 computeFeaturesFromSH(int idx, int deg, int max_coeffs, const float3* means, float3 campos, const float* shs, bool* clamped)
 {
 	// The implementation is loosely based on code for 
 	// "Differentiable Point-Based Radiance Fields for 
@@ -82,6 +82,8 @@ __device__ float2 computeFeaturesFromSH(int idx, int deg, int max_coeffs, const 
 		}
 	}
 	result = {max(result.x + 0.5f, 0.0f), max(result.y + 0.5f, 0.0f)};
+    clamped[0] = result.x < 0;
+    clamped[1] = result.y < 0;
 	return result;
 }
 
@@ -277,7 +279,7 @@ trace_bvh_cuda(int32_t num_rays, int32_t* nodes, float* aabbs,
 }
 
 
-void trace_bvh_opacity_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t* nodes, float* aabbs,
+void trace_bvh_opacity_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t G, int32_t* nodes, float* aabbs,
     float3* rays_o, float3* rays_d,
     float3* means3D, float* covs3D,
     float* opacities,
@@ -286,7 +288,10 @@ void trace_bvh_opacity_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t* nod
     float* rendered_opacity,
     float* rendered_tvalue,
     float* rendered_intensity,
-    float* rendered_raydrop){
+    float* rendered_raydrop,
+    bool needs_grad,
+    int32_t* contribute_gid, int32_t* contribute_depth, float* contribute_T, bool* contribute_clamp,
+    float* contribute_tprime, float* contribute_intensityprime, float* contribute_raydropprime, float* contribute_Talpha){
     //         cudaEvent_t start, stop;
     //         cudaEventCreate(&start);
     //         cudaEventCreate(&stop);
@@ -296,8 +301,10 @@ void trace_bvh_opacity_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t* nod
     thrust::for_each(thrust::device,
         thrust::make_counting_iterator<int32_t>(0),
         thrust::make_counting_iterator<int32_t>(num_rays),
-        [D, M, nodes, aabbs_internal, rays_o, rays_d, num_contributes,
-        means3D, covs3D, opacities, shs, rendered_opacity, rendered_tvalue, rendered_intensity, rendered_raydrop] __device__(int32_t idx){
+        [D, M, G, nodes, aabbs_internal, rays_o, rays_d, num_contributes,
+        means3D, covs3D, opacities, shs, rendered_opacity, rendered_tvalue, rendered_intensity, rendered_raydrop,
+        needs_grad, contribute_gid, contribute_depth, contribute_T, contribute_clamp,
+        contribute_tprime, contribute_intensityprime, contribute_raydropprime, contribute_Talpha] __device__(int32_t idx){
         IndexStack<int32_t> stack_device;
         stack_device.push(0);
         int32_t count = 0;
@@ -328,7 +335,8 @@ void trace_bvh_opacity_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t* nod
                             continue;
                         }
 
-                        float2 features = computeFeaturesFromSH(object_id2, D, M, (float3*)means3D, ray_o, shs);
+                        bool clamped[2] = {false, false};
+                        float2 features = computeFeaturesFromSH(object_id2, D, M, (float3*)means3D, ray_o, shs, clamped);
 
                         float3 pos = {
                                         ray_o.x + t * ray_d.x,
@@ -337,11 +345,34 @@ void trace_bvh_opacity_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t* nod
                         };
                         float power = gaussian_fn(means3D[object_id2], pos, covs3D + object_id2 * 6);
                         if(power > 0) continue;
-                        count += 1;
                         float alpha = opacities[object_id2] * __expf(power);
                         t_value += ray_opacity * alpha * t;
                         intensity += ray_opacity * alpha * features.x;
                         raydrop += ray_opacity * alpha * features.y;
+
+                        if (needs_grad){
+                            float Talpha = ray_opacity * alpha;
+                            float min_Talpha = -1;
+                            int32_t min_Talpha_id = -1;
+                            for (int32_t iG = 0; iG < G; iG++){
+                                if (min_Talpha < 0 || contribute_Talpha[idx * G + iG] < min_Talpha){
+                                    min_Talpha = contribute_Talpha[idx * G + iG];
+                                    min_Talpha_id = iG;
+                                }
+                            }
+                            if (min_Talpha_id >= 0 && Talpha > min_Talpha){
+                                contribute_gid[idx * G + min_Talpha_id] = object_id2;
+                                contribute_depth[idx * G + min_Talpha_id] = count;
+                                contribute_T[idx * G + min_Talpha_id] = ray_opacity;
+                                contribute_clamp[2 * (idx * G + min_Talpha_id)] = clamped[0]
+                                contribute_clamp[2 * (idx * G + min_Talpha_id) + 1] = clamped[1];
+                                contribute_tprime[idx * G + min_Talpha_id] = t;
+                                contribute_intensityprime[idx * G + min_Talpha_id] = features.x;
+                                contribute_raydropprime[idx * G + min_Talpha_id] = features.y;
+                                contribute_Talpha[idx * G + min_Talpha_id] = Talpha;
+                            }
+                        }
+                        count += 1;
                         ray_opacity *= 1 - alpha;
                         if(ray_opacity < 0.0001f){
                             break;
