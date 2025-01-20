@@ -364,7 +364,7 @@ void trace_bvh_opacity_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t G, i
                                 contribute_gid[idx * G + min_Talpha_id] = object_id2;
                                 contribute_depth[idx * G + min_Talpha_id] = count;
                                 contribute_T[idx * G + min_Talpha_id] = ray_opacity;
-                                contribute_clamp[2 * (idx * G + min_Talpha_id)] = clamped[0]
+                                contribute_clamp[2 * (idx * G + min_Talpha_id)] = clamped[0];
                                 contribute_clamp[2 * (idx * G + min_Talpha_id) + 1] = clamped[1];
                                 contribute_tprime[idx * G + min_Talpha_id] = t;
                                 contribute_intensityprime[idx * G + min_Talpha_id] = features.x;

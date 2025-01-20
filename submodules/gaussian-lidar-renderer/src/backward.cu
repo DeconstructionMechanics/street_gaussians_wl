@@ -12,7 +12,7 @@ __device__ void computeFeaturesFromSHBackward(int idx, int deg, int max_coeffs, 
         pos.y - campos.y,
         pos.z - campos.z,
         };
-    float dir_len = sqrtf(dir.x * dir.x + dir.y * dir.y + dir.z * dir.z);
+    float dir_len = sqrtf(dir_orig.x * dir_orig.x + dir_orig.y * dir_orig.y + dir_orig.z * dir_orig.z);
     float3 dir = {
         dir_orig.x / dir_len,
         dir_orig.y / dir_len,
@@ -28,9 +28,9 @@ __device__ void computeFeaturesFromSHBackward(int idx, int deg, int max_coeffs, 
 	dL_dfeature.x *= clamped[0] ? 0 : 1;
 	dL_dfeature.y *= clamped[1] ? 0 : 1;
 	
-	float2 dfeaturedx(0, 0);
-	float2 dfeaturedy(0, 0);
-	float2 dfeaturedz(0, 0);
+	float2 dfeaturedx = {0.0f, 0.0f};
+	float2 dfeaturedy = {0.0f, 0.0f};
+	float2 dfeaturedz = {0.0f, 0.0f};
 	float x = dir.x;
 	float y = dir.y;
 	float z = dir.z;
@@ -40,27 +40,20 @@ __device__ void computeFeaturesFromSHBackward(int idx, int deg, int max_coeffs, 
 
 	// No tricks here, just high school-level calculus.
 	float dfeaturedsh0 = SH_C0;
-	dL_dsh[0] += {
-        dfeaturedsh0 * dL_dfeature.x,
-        dfeaturedsh0 * dL_dfeature.y
-        };
+	dL_dsh[0].x += dfeaturedsh0 * dL_dfeature.x;
+    dL_dsh[0].y += dfeaturedsh0 * dL_dfeature.y;
+
 	if (deg > 0)
 	{
 		float dfeaturedsh1 = -SH_C1 * y;
 		float dfeaturedsh2 = SH_C1 * z;
 		float dfeaturedsh3 = -SH_C1 * x;
-		dL_dsh[1] += {
-            dfeaturedsh1 * dL_dfeature.x,
-            dfeaturedsh1 * dL_dfeature.y
-            };
-		dL_dsh[2] += {
-            dfeaturedsh2 * dL_dfeature.x,
-            dfeaturedsh2 * dL_dfeature.y
-            };
-		dL_dsh[3] += {
-            dfeaturedsh3 * dL_dfeature.x,
-            dfeaturedsh3 * dL_dfeature.y
-            };
+		dL_dsh[1].x += dfeaturedsh1 * dL_dfeature.x;
+        dL_dsh[1].y += dfeaturedsh1 * dL_dfeature.y;
+		dL_dsh[2].x += dfeaturedsh2 * dL_dfeature.x;
+        dL_dsh[2].y += dfeaturedsh2 * dL_dfeature.y;
+		dL_dsh[3].x += dfeaturedsh3 * dL_dfeature.x;
+        dL_dsh[3].y += dfeaturedsh3 * dL_dfeature.y;
 
 		dfeaturedx = {
             -SH_C1 * sh[3].x,
@@ -85,39 +78,23 @@ __device__ void computeFeaturesFromSHBackward(int idx, int deg, int max_coeffs, 
 			float dfeaturedsh6 = SH_C2[2] * (2.f * zz - xx - yy);
 			float dfeaturedsh7 = SH_C2[3] * xz;
 			float dfeaturedsh8 = SH_C2[4] * (xx - yy);
-			dL_dsh[4] += {
-                dfeaturedsh4 * dL_dfeature.x,
-                dfeaturedsh4 * dL_dfeature.y
-                };
-			dL_dsh[5] += {
-                dfeaturedsh5 * dL_dfeature.x,
-                dfeaturedsh5 * dL_dfeature.y
-                };
-			dL_dsh[6] += {
-                dfeaturedsh6 * dL_dfeature.x,
-                dfeaturedsh6 * dL_dfeature.y
-                };
-			dL_dsh[7] += {
-                dfeaturedsh7 * dL_dfeature.x,
-                dfeaturedsh7 * dL_dfeature.y
-                };
-			dL_dsh[8] += {
-                dfeaturedsh8 * dL_dfeature.x,
-                dfeaturedsh8 * dL_dfeature.y
-                };
+			dL_dsh[4].x += dfeaturedsh4 * dL_dfeature.x;
+            dL_dsh[4].y += dfeaturedsh4 * dL_dfeature.y;
+			dL_dsh[5].x += dfeaturedsh5 * dL_dfeature.x;
+            dL_dsh[5].y += dfeaturedsh5 * dL_dfeature.y;
+			dL_dsh[6].x += dfeaturedsh6 * dL_dfeature.x;
+            dL_dsh[6].y += dfeaturedsh6 * dL_dfeature.y;
+			dL_dsh[7].x += dfeaturedsh7 * dL_dfeature.x;
+            dL_dsh[7].y += dfeaturedsh7 * dL_dfeature.y;
+			dL_dsh[8].x += dfeaturedsh8 * dL_dfeature.x;
+            dL_dsh[8].y += dfeaturedsh8 * dL_dfeature.y;
 
-			dfeaturedx += {
-                SH_C2[0] * y * sh[4].x + SH_C2[2] * 2.f * -x * sh[6].x + SH_C2[3] * z * sh[7].x + SH_C2[4] * 2.f * x * sh[8].x,
-                SH_C2[0] * y * sh[4].y + SH_C2[2] * 2.f * -x * sh[6].y + SH_C2[3] * z * sh[7].y + SH_C2[4] * 2.f * x * sh[8].y
-                };
-			dfeaturedy += {
-                SH_C2[0] * x * sh[4].x + SH_C2[1] * z * sh[5].x + SH_C2[2] * 2.f * -y * sh[6].x + SH_C2[4] * 2.f * -y * sh[8].x,
-                SH_C2[0] * x * sh[4].y + SH_C2[1] * z * sh[5].y + SH_C2[2] * 2.f * -y * sh[6].y + SH_C2[4] * 2.f * -y * sh[8].y
-                };
-			dfeaturedz += {
-                SH_C2[1] * y * sh[5].x + SH_C2[2] * 2.f * 2.f * z * sh[6].x + SH_C2[3] * x * sh[7].x,
-                SH_C2[1] * y * sh[5].y + SH_C2[2] * 2.f * 2.f * z * sh[6].y + SH_C2[3] * x * sh[7].y
-                };
+			dfeaturedx.x = SH_C2[0] * y * sh[4].x + SH_C2[2] * 2.f * -x * sh[6].x + SH_C2[3] * z * sh[7].x + SH_C2[4] * 2.f * x * sh[8].x;
+            dfeaturedx.y = SH_C2[0] * y * sh[4].y + SH_C2[2] * 2.f * -x * sh[6].y + SH_C2[3] * z * sh[7].y + SH_C2[4] * 2.f * x * sh[8].y;
+			dfeaturedy.x += SH_C2[0] * x * sh[4].x + SH_C2[1] * z * sh[5].x + SH_C2[2] * 2.f * -y * sh[6].x + SH_C2[4] * 2.f * -y * sh[8].x;
+            dfeaturedy.y += SH_C2[0] * x * sh[4].y + SH_C2[1] * z * sh[5].y + SH_C2[2] * 2.f * -y * sh[6].y + SH_C2[4] * 2.f * -y * sh[8].y;
+			dfeaturedz.x += SH_C2[1] * y * sh[5].x + SH_C2[2] * 2.f * 2.f * z * sh[6].x + SH_C2[3] * x * sh[7].x;
+            dfeaturedz.y += SH_C2[1] * y * sh[5].y + SH_C2[2] * 2.f * 2.f * z * sh[6].y + SH_C2[3] * x * sh[7].y;
 
 			if (deg > 2)
 			{
@@ -128,81 +105,67 @@ __device__ void computeFeaturesFromSHBackward(int idx, int deg, int max_coeffs, 
 				float dfeaturedsh13 = SH_C3[4] * x * (4.f * zz - xx - yy);
 				float dfeaturedsh14 = SH_C3[5] * z * (xx - yy);
 				float dfeaturedsh15 = SH_C3[6] * x * (xx - 3.f * yy);
-				dL_dsh[9] += {
-                    dfeaturedsh9 * dL_dfeature.x,
-                    dfeaturedsh9 * dL_dfeature.y
-                    };
-				dL_dsh[10] += {
-                    dfeaturedsh10 * dL_dfeature.x,
-                    dfeaturedsh10 * dL_dfeature.y
-                    };
-				dL_dsh[11] += {
-                    dfeaturedsh11 * dL_dfeature.x,
-                    dfeaturedsh11 * dL_dfeature.y
-                    };
-				dL_dsh[12] += {
-                    dfeaturedsh12 * dL_dfeature.x,
-                    dfeaturedsh12 * dL_dfeature.y
-                    };
-				dL_dsh[13] += {
-                    dfeaturedsh13 * dL_dfeature.x,
-                    dfeaturedsh13 * dL_dfeature.y
-                    };
-				dL_dsh[14] += {
-                    dfeaturedsh14 * dL_dfeature.x,
-                    dfeaturedsh14 * dL_dfeature.y
-                    };
-				dL_dsh[15] += {
-                    dfeaturedsh15 * dL_dfeature.x,
-                    dfeaturedsh15 * dL_dfeature.y
-                    };
+				dL_dsh[9].x += dfeaturedsh9 * dL_dfeature.x;
+                dL_dsh[9].y+= dfeaturedsh9 * dL_dfeature.y;
+				dL_dsh[10].x += dfeaturedsh10 * dL_dfeature.x;
+                dL_dsh[10].y += dfeaturedsh10 * dL_dfeature.y;
+				dL_dsh[11].x += dfeaturedsh11 * dL_dfeature.x;
+                dL_dsh[11].y += dfeaturedsh11 * dL_dfeature.y;
+				dL_dsh[12].x += dfeaturedsh12 * dL_dfeature.x;
+                dL_dsh[12].y += dfeaturedsh12 * dL_dfeature.y;
+				dL_dsh[13].x += dfeaturedsh13 * dL_dfeature.x;
+                dL_dsh[13].y += dfeaturedsh13 * dL_dfeature.y;
+				dL_dsh[14].x += dfeaturedsh14 * dL_dfeature.x;
+                dL_dsh[14].y += dfeaturedsh14 * dL_dfeature.y;
+				dL_dsh[15].x += dfeaturedsh15 * dL_dfeature.x;
+                dL_dsh[15].y += dfeaturedsh15 * dL_dfeature.y;
 
-				dfeaturedx += {(
+				dfeaturedx.x +=
 					SH_C3[0] * sh[9].x * 3.f * 2.f * xy +
 					SH_C3[1] * sh[10].x * yz +
 					SH_C3[2] * sh[11].x * -2.f * xy +
 					SH_C3[3] * sh[12].x * -3.f * 2.f * xz +
 					SH_C3[4] * sh[13].x * (-3.f * xx + 4.f * zz - yy) +
 					SH_C3[5] * sh[14].x * 2.f * xz +
-					SH_C3[6] * sh[15].x * 3.f * (xx - yy)),
-                    (
+					SH_C3[6] * sh[15].x * 3.f * (xx - yy);
+                dfeaturedx.y +=
 					SH_C3[0] * sh[9].y * 3.f * 2.f * xy +
 					SH_C3[1] * sh[10].y * yz +
 					SH_C3[2] * sh[11].y * -2.f * xy +
 					SH_C3[3] * sh[12].y * -3.f * 2.f * xz +
 					SH_C3[4] * sh[13].y * (-3.f * xx + 4.f * zz - yy) +
 					SH_C3[5] * sh[14].y * 2.f * xz +
-					SH_C3[6] * sh[15].y * 3.f * (xx - yy))};
+					SH_C3[6] * sh[15].y * 3.f * (xx - yy);
 
-				dfeaturedy += {(
+				dfeaturedy.x +=
 					SH_C3[0] * sh[9].x * 3.f * (xx - yy) +
 					SH_C3[1] * sh[10].x * xz +
 					SH_C3[2] * sh[11].x * (-3.f * yy + 4.f * zz - xx) +
 					SH_C3[3] * sh[12].x * -3.f * 2.f * yz +
 					SH_C3[4] * sh[13].x * -2.f * xy +
 					SH_C3[5] * sh[14].x * -2.f * yz +
-					SH_C3[6] * sh[15].x * -3.f * 2.f * xy),
-                    (
+					SH_C3[6] * sh[15].x * -3.f * 2.f * xy;
+                dfeaturedy.y +=
 					SH_C3[0] * sh[9].y * 3.f * (xx - yy) +
 					SH_C3[1] * sh[10].y * xz +
 					SH_C3[2] * sh[11].y * (-3.f * yy + 4.f * zz - xx) +
 					SH_C3[3] * sh[12].y * -3.f * 2.f * yz +
 					SH_C3[4] * sh[13].y * -2.f * xy +
 					SH_C3[5] * sh[14].y * -2.f * yz +
-					SH_C3[6] * sh[15].y * -3.f * 2.f * xy)};
+					SH_C3[6] * sh[15].y * -3.f * 2.f * xy;
 
-				dfeaturedz += {(
+				dfeaturedz.x +=
 					SH_C3[1] * sh[10].x * xy +
 					SH_C3[2] * sh[11].x * 4.f * 2.f * yz +
 					SH_C3[3] * sh[12].x * 3.f * (2.f * zz - xx - yy) +
 					SH_C3[4] * sh[13].x * 4.f * 2.f * xz +
-					SH_C3[5] * sh[14].x * (xx - yy)),
-                    (
+					SH_C3[5] * sh[14].x * (xx - yy);
+                dfeaturedz.y +=
 					SH_C3[1] * sh[10].y * xy +
 					SH_C3[2] * sh[11].y * 4.f * 2.f * yz +
 					SH_C3[3] * sh[12].y * 3.f * (2.f * zz - xx - yy) +
 					SH_C3[4] * sh[13].y * 4.f * 2.f * xz +
-					SH_C3[5] * sh[14].y * (xx - yy))};
+					SH_C3[5] * sh[14].y * (xx - yy);
 			}
 		}
 	}
@@ -210,7 +173,11 @@ __device__ void computeFeaturesFromSHBackward(int idx, int deg, int max_coeffs, 
 	// The view direction is an input to the computation. View direction
 	// is influenced by the Gaussian's mean, so SHs gradients
 	// must propagate back into 3D position.
-	float3 dL_ddir((dfeaturedx.x * dL_dfeature.x + dfeaturedx.y * dL_dfeature.y), (dfeaturedy.x * dL_dfeature.x + dfeaturedy.y * dL_dfeature.y), (dfeaturedz.x * dL_dfeature.x + dfeaturedz.y * dL_dfeature.y));
+	float3 dL_ddir = {
+		(dfeaturedx.x * dL_dfeature.x + dfeaturedx.y * dL_dfeature.y),
+		(dfeaturedy.x * dL_dfeature.x + dfeaturedy.y * dL_dfeature.y),
+		(dfeaturedz.x * dL_dfeature.x + dfeaturedz.y * dL_dfeature.y),
+		};
 
 	// Account for normalization of direction
 	float3 dL_dmean = dnormvdv(dir_orig, dL_ddir);
@@ -218,7 +185,9 @@ __device__ void computeFeaturesFromSHBackward(int idx, int deg, int max_coeffs, 
 	// Gradients of loss w.r.t. Gaussian means, but only the portion 
 	// that is caused because the mean affects the view-dependent color.
 	// Additional mean gradient is accumulated in below methods.
-	dL_dmeans[idx] += dL_dmean;
+	dL_dmeans[idx].x += dL_dmean.x;
+	dL_dmeans[idx].y += dL_dmean.y;
+	dL_dmeans[idx].z += dL_dmean.z;
 }
 
 
@@ -285,15 +254,15 @@ void backward_trace_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t G,
 		float ray_grad_up_raydrop = grad_up_raydrop[ray_idx];
 		
         for (int32_t iG = 0; iG < G; iG++){
-            int32_t gaussian_idx = *(contribute_gid + idx * G + iG);
+            int32_t gaussian_idx = *(contribute_gid + ray_idx * G + iG);
             if (gaussian_idx < 0){
                 continue;
             }
-			float T = *(contribute_T + idx * G + iG);
-            bool* clamp = contribute_clamp +  2 * (idx * G + iG);
-			float tprime = *(contribute_tprime + idx * G + iG);
-			float intensityprime = *(contribute_intensityprime + idx * G + iG);
-			float raydropprime = *(contribute_raydropprime + idx * G + iG);
+			float T = *(contribute_T + ray_idx * G + iG);
+            bool* clamp = contribute_clamp +  2 * (ray_idx * G + iG);
+			float tprime = *(contribute_tprime + ray_idx * G + iG);
+			float intensityprime = *(contribute_intensityprime + ray_idx * G + iG);
+			float raydropprime = *(contribute_raydropprime + ray_idx * G + iG);
 			float* covs3D_ptr = covs3D + gaussian_idx * 6;
 			float* grad_covs3D_ptr = grad_covs3D + gaussian_idx * 6;
 
@@ -302,7 +271,7 @@ void backward_trace_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t G,
 							ray_o.y + tprime * ray_d.y,
 							ray_o.z + tprime * ray_d.z,
 			};
-			float exp_power = __expf(gaussian_fn(means3D[gaussian_idx], pos, covs3D_ptr))
+			float exp_power = __expf(gaussian_fn(means3D[gaussian_idx], pos, covs3D_ptr));
 			float alpha = opacity[gaussian_idx] * exp_power;
 
 			// feature -> alpha
@@ -313,14 +282,14 @@ void backward_trace_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t G,
 			float dpostintensity_dalpha = 0;
 			float dpostraydrop_dalpha = 0;
 			for (int32_t iG2 = 0; iG2 < G; iG2++){
-				int32_t gaussian_idx2 = *(contribute_gid + idx * G + iG2);
+				int32_t gaussian_idx2 = *(contribute_gid + ray_idx * G + iG2);
 				if (gaussian_idx2 < 0){
 					continue;
 				}
-				float T2 = *(contribute_T + idx * G + iG2);
-				float tprime2 = *(contribute_tprime + idx * G + iG2);
-				float intensityprime2 = *(contribute_intensityprime + idx * G + iG2);
-				float raydropprime2 = *(contribute_raydropprime + idx * G + iG2);
+				float T2 = *(contribute_T + ray_idx * G + iG2);
+				float tprime2 = *(contribute_tprime + ray_idx * G + iG2);
+				float intensityprime2 = *(contribute_intensityprime + ray_idx * G + iG2);
+				float raydropprime2 = *(contribute_raydropprime + ray_idx * G + iG2);
 				float* covs3D_ptr2 = covs3D + gaussian_idx2 * 6;
 				float3 pos2 = {
 					ray_o.x + tprime2 * ray_d.x,
@@ -354,7 +323,9 @@ void backward_trace_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t G,
 				-1 * (covs3D_ptr[1] * d.x + covs3D_ptr[3] * d.y + covs3D_ptr[4] * d.z) * grad_power,
 				-1 * (covs3D_ptr[2] * d.x + covs3D_ptr[4] * d.y + covs3D_ptr[5] * d.z) * grad_power,
 			};
-			grad_means3D[gaussian_idx] += grad_d;
+			grad_means3D[gaussian_idx].x += grad_d.x;
+			grad_means3D[gaussian_idx].y += grad_d.y;
+			grad_means3D[gaussian_idx].z += grad_d.z;
 			float grad_tprime = -1 * (ray_d.x * grad_d.x + ray_d.y * grad_d.y + ray_d.z * grad_d.z);
 
 			// feature -> featureprime
@@ -371,11 +342,9 @@ void backward_trace_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t G,
 				covs3D_ptr[2] * ray_d.x + covs3D_ptr[4] * ray_d.y + covs3D_ptr[5] * ray_d.z,
 			};
 			float rd_sigma_rd = ray_d.x * sigma_rd.x + ray_d.y * sigma_rd.y + ray_d.z * sigma_rd.z;
-			grad_means3D[gaussian_idx] += {
-				sigma_rd.x * grad_tprime / rd_sigma_rd,
-				sigma_rd.y * grad_tprime / rd_sigma_rd,
-				sigma_rd.z * grad_tprime / rd_sigma_rd,
-			};
+			grad_means3D[gaussian_idx].x += sigma_rd.x * grad_tprime / rd_sigma_rd;
+			grad_means3D[gaussian_idx].y += sigma_rd.y * grad_tprime / rd_sigma_rd;
+			grad_means3D[gaussian_idx].z += sigma_rd.z * grad_tprime / rd_sigma_rd;
 
 			// tprime -> covs3D
 			float3 miu = {means3D[gaussian_idx].x - ray_o.x, means3D[gaussian_idx].y - ray_o.y, means3D[gaussian_idx].z - ray_o.z};

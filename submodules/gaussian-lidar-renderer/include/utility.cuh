@@ -141,4 +141,10 @@ __forceinline__ __device__ float3 dnormvdv(float3 v, float3 dv)
 	return dnormvdv;
 }
 
+__host__ __device__ inline float2& operator+=(float2& lhs, const float2& rhs) {
+    lhs.x += rhs.x;
+    lhs.y += rhs.y;
+    return lhs;
+}
+
 #endif //BVH_UTILITY_CUH
