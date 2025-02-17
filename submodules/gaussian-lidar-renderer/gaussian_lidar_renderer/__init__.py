@@ -76,9 +76,10 @@ class GaussianLidarRenderer(torch.autograd.Function):
         if needs_grad:
             ctx.save_for_backward(contribute_gid, contribute_depth, contribute_T, contribute_clamp,\
                                   contribute_tprime, contribute_intensityprime, contribute_raydropprime,\
-                                  weights, tvalues, intensity, raydrop,\
-                                  means3D, scales, rotations, opacity, shs, sh_degree,\
+                                  weights, tvalues, intensities, raydrops,\
+                                  means3D, scales, rotations, opacity, shs,\
                                   rays_o, rays_d)
+            ctx.sh_degree = sh_degree
         else:
             ctx.save_for_backward(None)
         return n_contribute, weights, tvalues, intensities, raydrops
@@ -89,8 +90,9 @@ class GaussianLidarRenderer(torch.autograd.Function):
         contribute_gid, contribute_depth, contribute_T, contribute_clamp,\
         contribute_tprime, contribute_intensityprime, contribute_raydropprime,\
         weights, tvalues, intensity, raydrop,\
-        means3D, scales, rotations, opacity, shs, sh_degree,\
+        means3D, scales, rotations, opacity, shs,\
         rays_o, rays_d = ctx.saved_tensors
+        sh_degree = ctx.sh_degree
         '''
         contribute_gid: (n_ray, n_gaussian), contributed gaussian index, int, -1 means gaussian not exist
         contribute_depth: (n_ray, n_gaussian), contributed depth of gaussian, int, start with 0, -1 means gaussian not exist
