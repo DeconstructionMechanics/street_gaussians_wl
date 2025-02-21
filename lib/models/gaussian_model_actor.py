@@ -139,7 +139,7 @@ class GaussianModelActor(GaussianModel):
         # features[:, :3, 0] = fused_color
         features_dc = torch.zeros((fused_color.shape[0], 3 + self.add_feature_dim, self.fourier_dim)).float().cuda()
         features_rest = torch.zeros(fused_color.shape[0], 3 + self.add_feature_dim, (self.max_sh_degree + 1) ** 2 - 1).float().cuda()
-        features_dc[:, :3, 0] = torch.cat((fused_color, torch.zeros(fused_color.shape[0], self.add_feature_dim).float().cuda()), dim=1)
+        features_dc[:, :3, 0] = fused_color
 
         print(f"Number of points at initialisation for {self.model_name}: ", fused_point_cloud.shape[0])
         dist2 = torch.clamp_min(distCUDA2(torch.from_numpy(np.asarray(pointcloud_xyz)).float().cuda()), 0.0000001)

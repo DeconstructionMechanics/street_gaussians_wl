@@ -170,6 +170,7 @@ def parse_seq_rawdata(process_list, root_dir, seq_name, seq_save_dir, track_file
         for i in range(5):
             np.savetxt(os.path.join(extrinsic_save_dir, f"{str(camera_names[i] - 1)}.txt"), extrinsics[i])
             np.savetxt(os.path.join(intrinsic_save_dir, f"{str(camera_names[i] - 1)}.txt"), intrinsics[i])
+
     
     if 'image' in process_list:
         image_save_dir = os.path.join(seq_save_dir, 'images')
@@ -185,6 +186,7 @@ def parse_seq_rawdata(process_list, root_dir, seq_name, seq_save_dir, track_file
                 cv2.imwrite(img_path, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
 
         print("Processing image data done...")
+    
 
     if 'lidar' in process_list:
         pts_3d_all = dict()
@@ -192,6 +194,23 @@ def parse_seq_rawdata(process_list, root_dir, seq_name, seq_save_dir, track_file
         print("Processing LiDAR data...")
                 
         datafile = WaymoDataFileReader(seq_path)
+
+
+        #seperate 5 lidar and their beams
+        top_beams_all = dict()
+        front_beams_all = dict()
+        sideLeft_beams_all = dict()
+        sideRight_beams_all = dict()
+        rear_beams_all = dict()
+
+        beams_dict = {
+            'TOP':top_beams_all,
+            'FRONT':front_beams_all,
+            'SIDE_LEFT':sideLeft_beams_all,
+            'SIDE_RIGHT':sideRight_beams_all,
+            'REAR':rear_beams_all,
+        } 
+
         for frame_id, frame in tqdm(enumerate(datafile)):
             pts_3d = [] # LiDAR point cloud in world frame
             pts_2d = [] # LiDAR point cloud projection in camera [camera_name, w, h] 
@@ -200,9 +219,30 @@ def parse_seq_rawdata(process_list, root_dir, seq_name, seq_save_dir, track_file
                 laser = utils.get(frame.lasers, laser_name)
                 laser_calibration = utils.get(frame.context.laser_calibrations, laser_name)
                 ri, camera_projection, range_image_pose = utils.parse_range_image_and_camera_projection(laser)
-
+                #print('laser_name:',laser_name)
+                print('laser_name_str:',laser_name_str)
+                #print('laser_type:',type(laser))
+                #print('ri.shape:',ri.shape)
+                #print('camera_projection',camera_projection.shape)
+                #print('range_image_pose',range_image_pose.shape)
                 # LiDAR spherical coordinate -> polar -> cartesian
                 pcl, pcl_attr = utils.project_to_pointcloud(frame, ri, camera_projection, range_image_pose, laser_calibration)
+                
+                # Transform LIDAR point cloud from vehicle frame to world frame
+                vehicle_pose = np.array(frame.pose.transform).reshape(4, 4)
+                pcl = vehicle_pose.dot(np.concatenate([pcl, np.ones((pcl.shape[0], 1))], axis=1).T).T
+                
+                #print('pcl:',pcl)
+                #print('pcl.shape',pcl.shape)
+                #print('pcl_attr',pcl_attr)
+                #print('pcl_attr.shape',pcl_attr.shape)
+                #print('pts_3d.append:',pcl[:, :3])
+                #print('pts_3d.append.shape:',pcl[:, :3].shape)
+
+
+                lidar_beams_all = beams_dict[laser_name_str]
+                lidar_beams_all[frame_id] = pcl[:, :3]
+
                 pts_3d.append(pcl[:, :3]) # save LiDAR pointcloud in vehicle frame 
                 
                 # Transform LIDAR point cloud from vehicle frame to world frame
@@ -230,7 +270,7 @@ def parse_seq_rawdata(process_list, root_dir, seq_name, seq_save_dir, track_file
                 camera_projection = camera_projection.astype(np.int16)
                 
                 pts_2d.append(camera_projection)
-
+            #print(beams_dict)
             pts_3d = np.concatenate(pts_3d, axis=0)
             pts_3d_all[frame_id] = pts_3d
             pts_2d = np.concatenate(pts_2d, axis=0)
@@ -239,6 +279,12 @@ def parse_seq_rawdata(process_list, root_dir, seq_name, seq_save_dir, track_file
         np.savez_compressed(f'{seq_save_dir}/pointcloud.npz', 
                             pointcloud=pts_3d_all, 
                             camera_projection=pts_2d_all)
+        np.savez_compressed(f'{seq_save_dir}/beams.npz',
+                            top = beams_dict['TOP'],
+                            front = beams_dict['FRONT'],
+                            side_left = beams_dict['SIDE_LEFT'],
+                            side_right = beams_dict['SIDE_RIGHT'],
+                            rear = beams_dict['REAR'])
         print("Processing LiDAR data done...")
 
     if 'track' in process_list:

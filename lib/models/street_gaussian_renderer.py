@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 from lib.utils.sh_utils import eval_sh
 from lib.models.street_gaussian_model import StreetGaussianModel
 from lib.utils.camera_utils import Camera, make_rasterizer
@@ -247,13 +248,24 @@ class StreetGaussianRenderer():
         )
 
         lidar_feature_map = [False, False, False, True, True]
+        #lidar_sh = pc.get_features[:, :, lidar_feature_map]
         lidar_sh = pc.get_features[:, :, lidar_feature_map]
 
         aabb_scale = 20
+        print('Render begins:')
+
+        lidar_beam_data = np.load('total_data.npz',allow_pickle=True)
+
+        total_data = lidar_beam_data['total'].astype(np.float32)
+
+        lidar_position = torch.from_numpy(total_data[:,:3])
+        beams = torch.from_numpy(total_data[:,3:])
+
+
         lidar_n_contribute, lidar_weights, lidar_t_values, lidar_intensity, lidar_raydrop = GaussianLidarRenderer.apply(
             means3D,
             pc.get_scaling, 
-            pc.get_rotations,
+            pc.get_rotation,
             opacity,
             lidar_sh,
             pc.max_sh_degree,
@@ -264,6 +276,8 @@ class StreetGaussianRenderer():
         lidar_mask_raydrop = lidar_raydrop > 0.5
 
         
+
+
         if cfg.mode != 'train':
             rendered_color = torch.clamp(rendered_color, 0., 1.)
         
