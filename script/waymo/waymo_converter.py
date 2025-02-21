@@ -189,6 +189,10 @@ def parse_seq_rawdata(process_list, root_dir, seq_name, seq_save_dir, track_file
     
 
     if 'lidar' in process_list:
+
+        lidar_save_dir = os.path.join(seq_save_dir, 'lidar_ray')
+        os.makedirs(lidar_save_dir, exist_ok=True)
+        
         pts_3d_all = dict()
         pts_2d_all = dict()
         print("Processing LiDAR data...")
@@ -196,20 +200,7 @@ def parse_seq_rawdata(process_list, root_dir, seq_name, seq_save_dir, track_file
         datafile = WaymoDataFileReader(seq_path)
 
 
-        #seperate 5 lidar and their beams
-        top_beams_all = dict()
-        front_beams_all = dict()
-        sideLeft_beams_all = dict()
-        sideRight_beams_all = dict()
-        rear_beams_all = dict()
-
-        beams_dict = {
-            'TOP':top_beams_all,
-            'FRONT':front_beams_all,
-            'SIDE_LEFT':sideLeft_beams_all,
-            'SIDE_RIGHT':sideRight_beams_all,
-            'REAR':rear_beams_all,
-        } 
+        # TODO
 
         for frame_id, frame in tqdm(enumerate(datafile)):
             pts_3d = [] # LiDAR point cloud in world frame
@@ -219,35 +210,23 @@ def parse_seq_rawdata(process_list, root_dir, seq_name, seq_save_dir, track_file
                 laser = utils.get(frame.lasers, laser_name)
                 laser_calibration = utils.get(frame.context.laser_calibrations, laser_name)
                 ri, camera_projection, range_image_pose = utils.parse_range_image_and_camera_projection(laser)
-                #print('laser_name:',laser_name)
-                print('laser_name_str:',laser_name_str)
-                #print('laser_type:',type(laser))
-                #print('ri.shape:',ri.shape)
-                #print('camera_projection',camera_projection.shape)
-                #print('range_image_pose',range_image_pose.shape)
+                
                 # LiDAR spherical coordinate -> polar -> cartesian
                 pcl, pcl_attr = utils.project_to_pointcloud(frame, ri, camera_projection, range_image_pose, laser_calibration)
-                
-                # Transform LIDAR point cloud from vehicle frame to world frame
-                vehicle_pose = np.array(frame.pose.transform).reshape(4, 4)
-                pcl = vehicle_pose.dot(np.concatenate([pcl, np.ones((pcl.shape[0], 1))], axis=1).T).T
-                
-                #print('pcl:',pcl)
-                #print('pcl.shape',pcl.shape)
-                #print('pcl_attr',pcl_attr)
-                #print('pcl_attr.shape',pcl_attr.shape)
-                #print('pts_3d.append:',pcl[:, :3])
-                #print('pts_3d.append.shape:',pcl[:, :3].shape)
-
-
-                lidar_beams_all = beams_dict[laser_name_str]
-                lidar_beams_all[frame_id] = pcl[:, :3]
 
                 pts_3d.append(pcl[:, :3]) # save LiDAR pointcloud in vehicle frame 
                 
                 # Transform LIDAR point cloud from vehicle frame to world frame
                 # vehicle_pose = np.array(frame.pose.transform).reshape(4, 4)
                 # pcl = vehicle_pose.dot(np.concatenate([pcl, np.ones((pcl.shape[0], 1))], axis=1).T).T
+
+                # LiDAR data collect for gaussian-lidar-renderer
+                extrinsic = np.array(laser_calibration.extrinsic.transform).reshape(4,4)
+                lidar_coordinate = extrinsic[:3, 3]
+                ri_direction = np.copy(ri)
+                ri_direction[:, :, 0] = 1
+                pcl_direction, pcl_direction_attr = utils.project_to_pointcloud(frame, ri_direction, camera_projection, range_image_pose, laser_calibration)
+                lidar_ray_directions = pcl_direction[:, :3].reshape(ri.shape[0], ri.shape[1], 3)
                                     
                 mask = ri[:, :, 0] > 0
                 camera_projection = camera_projection[mask]
@@ -270,6 +249,16 @@ def parse_seq_rawdata(process_list, root_dir, seq_name, seq_save_dir, track_file
                 camera_projection = camera_projection.astype(np.int16)
                 
                 pts_2d.append(camera_projection)
+
+                # LiDAR data save for gaussian-lidar-renderer
+                npz_path = os.path.join(lidar_save_dir, f'{frame_id:06d}_{str(laser_name - 1)}.npz')
+                np.savez_compressed(npz_path,
+                                    lidar_coordinate=lidar_coordinate,
+                                    lidar_ray_directions=lidar_ray_directions,
+                                    range_image=ri,
+                                    mask=mask)
+
+
             #print(beams_dict)
             pts_3d = np.concatenate(pts_3d, axis=0)
             pts_3d_all[frame_id] = pts_3d
@@ -279,12 +268,6 @@ def parse_seq_rawdata(process_list, root_dir, seq_name, seq_save_dir, track_file
         np.savez_compressed(f'{seq_save_dir}/pointcloud.npz', 
                             pointcloud=pts_3d_all, 
                             camera_projection=pts_2d_all)
-        np.savez_compressed(f'{seq_save_dir}/beams.npz',
-                            top = beams_dict['TOP'],
-                            front = beams_dict['FRONT'],
-                            side_left = beams_dict['SIDE_LEFT'],
-                            side_right = beams_dict['SIDE_RIGHT'],
-                            rear = beams_dict['REAR'])
         print("Processing LiDAR data done...")
 
     if 'track' in process_list:
@@ -591,6 +574,7 @@ def main():
     # seq_lists = open(os.path.join(root_dir, 'segment_list.txt')).read().splitlines()
     os.makedirs(save_dir, exist_ok=True)
     for i, scene_id in enumerate(scene_ids_list):
+        print(f'[scene_id {scene_id}]')
         assert seq_names[i][3:] == seq_lists[scene_id][8:14]
         seq_save_dir = os.path.join(save_dir, str(scene_id).zfill(3))
         parse_seq_rawdata(
