@@ -220,7 +220,7 @@ def parse_seq_rawdata(process_list, root_dir, seq_name, seq_save_dir, track_file
                 # vehicle_pose = np.array(frame.pose.transform).reshape(4, 4)
                 # pcl = vehicle_pose.dot(np.concatenate([pcl, np.ones((pcl.shape[0], 1))], axis=1).T).T
 
-                # LiDAR data collect for gaussian-lidar-renderer
+                # LiDAR data collect for lidar_ray
                 extrinsic = np.array(laser_calibration.extrinsic.transform).reshape(4,4)
                 lidar_coordinate = extrinsic[:3, 3]
                 ri_direction = np.copy(ri)
@@ -230,6 +230,10 @@ def parse_seq_rawdata(process_list, root_dir, seq_name, seq_save_dir, track_file
                                     
                 mask = ri[:, :, 0] > 0
                 camera_projection = camera_projection[mask]
+
+                # LiDAR second response for lidar_ray
+                ri_2, camera_projection_2, range_image_pose_2 = utils.parse_range_image_and_camera_projection(laser, second_response=True)
+                mask_2 = ri_2[:, :, 0] > 0
 
                 # Can be projected to multi-cameras, order: [FRONT, FRONT_LEFT, FRONT_RIGHT, SIDE_LEFT, SIDE_RIGHT].
                 # Only save the first projection camera,
@@ -250,13 +254,15 @@ def parse_seq_rawdata(process_list, root_dir, seq_name, seq_save_dir, track_file
                 
                 pts_2d.append(camera_projection)
 
-                # LiDAR data save for gaussian-lidar-renderer
+                # LiDAR data save for lidar_ray
                 npz_path = os.path.join(lidar_save_dir, f'{frame_id:06d}_{str(laser_name - 1)}.npz')
                 np.savez_compressed(npz_path,
                                     lidar_coordinate=lidar_coordinate,
                                     lidar_ray_directions=lidar_ray_directions,
-                                    range_image=ri,
-                                    mask=mask)
+                                    range_image_1=ri,
+                                    mask_1=mask,
+                                    range_image_2=ri_2,
+                                    mask_2=mask_2)
 
 
             #print(beams_dict)
