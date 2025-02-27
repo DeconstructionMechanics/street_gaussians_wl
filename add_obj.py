@@ -21,8 +21,7 @@ import torchvision
 import imageio
 import torch.nn as nn
 import os
-from scipy.ndimage import median_filter
-from scipy.ndimage import zoom
+from scipy.ndimage import median_filter, generic_filter, zoom
 
 from perlin_numpy import generate_fractal_noise_2d, generate_perlin_noise_2d
 
@@ -86,10 +85,10 @@ def loadCam(camdata, R, T, foVx=None, foVy=None):
         metadata=deepcopy(camdata["metadata"]),
     )
 
-def is_diff_depth(ori, dst):
+def is_diff_depth(ori, dst, th = 0.1):
     if math.isnan(ori) or math.isnan(dst):
         return True
-    if abs(ori - dst) > 0.5:
+    if abs(ori - dst) > th:
         return True
     return False
 
@@ -98,12 +97,47 @@ dY = [-1,  0,  1, -1, 1, -1, 0, 1]
 ld = 8
 
 def is_floating_depth(i, j, depth):
+    flg = 0
     for k in range(ld):
         if i+dX[k] < 0 or i+dX[k] >= depth.shape[0] or j+dY[k] < 0 or j+dY[k] >= depth.shape[1]:
             continue
         if not is_diff_depth(depth[i][j], depth[i+dX[k]][j+dY[k]]):
-            return False
+            if flg == 2:
+                return False
+            else:
+                flg += 1
     return True
+
+import queue
+
+def _count_adj_points(x, y, depth, vis, q):
+    cnt_q = queue.Queue()
+    cnt_q.put((x, y))
+    q.put((x, y))
+    cnt = 1
+    while not cnt_q.empty():
+        i, j = cnt_q.get()
+        for k in range(ld):
+            idx = i + dX[k]
+            jdy = j + dY[k]
+            if idx < 0 or idx >= depth.shape[0] or jdy < 0 or jdy >= depth.shape[1]:
+                continue
+            if (not is_diff_depth(depth[idx][jdy], depth[i][j], th=0.5)) and vis[idx][jdy] == 0:
+            # if (not np.isnan(depth[idx][jdy])) and vis[idx][jdy] == 0:
+                vis[idx][jdy] = 1
+                cnt_q.put((idx, jdy))
+                q.put((idx, jdy))
+                cnt += 1
+    return cnt
+
+def count_adj_points(i, j, depth, cnt_arr):
+    vis = np.zeros(depth.shape)
+    vis[i][j] = 1
+    q = queue.Queue()
+    cnt = _count_adj_points(i, j, depth, vis, q)
+    while not q.empty():
+        x, y = q.get()
+        cnt_arr[x][y] = cnt
 
 def depth_to_point_cloud_torch(depth: np.ndarray, fovX: float, fovY: float, world_view_transform: torch.Tensor):
     """
@@ -120,15 +154,39 @@ def depth_to_point_cloud_torch(depth: np.ndarray, fovX: float, fovY: float, worl
     """
     # Convert depth to a torch tensor
     depth = depth.squeeze()
+
+    depth = median_filter(depth, size=5)
+
+    # remove discontinuous points
+    cnt_arr = np.zeros(depth.shape)
+    for i in range(depth.shape[0]):
+        for j in range(depth.shape[1]):
+            if depth[i][j] != np.nan and cnt_arr[i][j] == 0:
+                count_adj_points(i, j, depth, cnt_arr)
+    for i in range(depth.shape[0]):
+        for j in range(depth.shape[1]):
+            if depth[i][j] != np.nan and cnt_arr[i][j] < 300:
+                depth[i][j] = np.nan
+    
+    depth = zoom(depth, 6, order=1)
+    
+    # remove floating points
     depth2 = depth.copy()
     for i in range(depth.shape[0]):
         for j in range(depth.shape[1]):
             if is_floating_depth(i,j, depth):
-                depth2[i][j] = math.nan
-    print(depth2)
+                depth2[i][j] = np.nan
+    # print(depth2)
     depth = depth2.copy()
+    # def nan_to_mean(values):
+    #     valid_values = values[~np.isnan(values)]
+    #     return np.nanmean(valid_values) if valid_values.size > 0 else np.nan
+    # depth = generic_filter(depth, nan_to_mean, size=5, mode='constant', cval=np.nan)
+    
     # depth = median_filter(depth, size=5)
-    # depth = zoom(depth, 2, order=2)
+    # depth = zoom(depth, 6)
+    
+    t_shape = depth.shape
 
     # Apply median filter with a window size (e.g., 3x3)
     depth = torch.from_numpy(depth)
@@ -188,7 +246,7 @@ def depth_to_point_cloud_torch(depth: np.ndarray, fovX: float, fovY: float, worl
     points_world_space[:, 0] = points_world_space[:, 0] + 3
     points_world_space[:, 1] = points_world_space[:, 1] - 1
 
-    return points_world_space, valid_mask
+    return points_world_space.cpu(), valid_mask.cpu(), t_shape
 
 
 def save_ply(filename, points, opacity=None, features_dc=None, features_extra=None,
@@ -274,26 +332,55 @@ def save_ply(filename, points, opacity=None, features_dc=None, features_extra=No
     plydata.write(filename)
     print(f"PLY file saved to {filename}")
 
+def generate_points_meta(shape, color = None):
+    sc = np.random.rand(shape[0], shape[1]) * 0.3 - 4
+    
+    oc = np.ones((shape[0]))
+    oc.fill(5)
+    
+    rt = np.tile(np.array([1, 0, 0, 0]), (shape[0], 1))
+    
+    if color is None:
+        fused_color = RGB2SH(torch.tensor(
+            np.tile(np.array([0.9, 0.9, 0.9]), (shape[0], 1))).float())
+    else:
+        fused_color = RGB2SH(color.float())
+    features = torch.zeros(
+        (fused_color.shape[0], 3, (gaussians.background.max_sh_degree + 1) ** 2)).float()
+    features[..., 0] = fused_color
+
+    return sc, oc, rt, features
+    pass
+
+import sys
 
 with torch.no_grad():
+    cfg.data.use_test_cam = False
     dataset = Dataset()
+    sys.stdout.flush()
     gaussians = StreetGaussianModel(dataset.scene_info.metadata)
+    print('done load model')
+    sys.stdout.flush()
     scene = Scene(gaussians=gaussians, dataset=dataset)
     # gaussians.load_ply('./output/waymo_full_exp/waymo_train_002/point_cloud/iteration_50000/point_cloud.ply')
 
     print(gaussians.model_name_id)
     print(gaussians.metadata['scene_center'])
+    
+    sys.stdout.flush()
 
     # cam = Camera(1, R, T, 2000, 2000, None, None, "BEV_Depth")
     cam_old: Camera = dataset.train_cameras[cfg.resolution_scales[0]][0]
     print(cam_old.FoVx, math.tan((cam_old.FoVx / 2)))
     print(cam_old.FoVy, math.tan((cam_old.FoVy / 2)))
     print(cam_old.projection_matrix)
+    sys.stdout.flush()
     camd = loadCamData(
         dataset.scene_info.train_cameras[0], cfg.resolution_scales[0])
     # cam = Camera(cam_old.id, R, T, cam_old.FoVx, cam_old.FoVy, cam_old.K.cpu().numpy(), cam_old.original_image, 'BEV', cam_old.trans, cam_old.scale, cam_old.meta, )
     # cam.ego_pose = cam_old.ego_pose
     # cam.extrinsic = cam_old.extrinsic
+    gaussians.background.background_mask = torch.mean(gaussians.background._scaling, dim=1) < 0
 
     R = np.array(cam_old.R)
     theta_max = -1.57
@@ -329,34 +416,58 @@ with torch.no_grad():
     except:
         pass
 
-    t_shape = depth.shape
-
-    pc, mask = depth_to_point_cloud_torch(
+    pc, mask, t_shape = depth_to_point_cloud_torch(
         depth, cam.FoVx, cam.FoVy, cam.world_view_transform)
     
-    noise = generate_perlin_noise_2d((1024, 1024), (64, 64))
+    noise = generate_perlin_noise_2d((4096, 4096), (8, 8))
     noise = zoom(noise, (t_shape[0]/noise.shape[0], t_shape[1]/noise.shape[1]))
     noise = noise[mask].flatten()
+
+    noise2 = generate_perlin_noise_2d((4096, 4096), (16, 16))
+    # noise2 = torch.randn((4096, 4096))*2-1
+    noise2 = zoom(noise2, (t_shape[0]/noise2.shape[0], t_shape[1]/noise2.shape[1]))
+    noise2 = noise2[mask].flatten()
     
+    # min_len = torch.inf
+    # for i in range(1, pc.shape[0]):
+    #     min_len = min(min_len, torch.linalg.vector_norm(pc[i-1]-pc[i], ord=3))
+    
+    noise = (noise+1)/1.5
+    noise2 = (noise2+1)/1.5
+    
+    noise = torch.from_numpy(noise)
+    noise2 = torch.from_numpy(noise2)
+    
+    rand1 = torch.rand((pc.shape[0], ))
+    rand2 = torch.rand((pc.shape[0], ))
 
-    oc = np.ones((pc.shape[0]))
-    oc.fill(5)
-    sc = np.zeros((pc.shape[0], pc.shape[1]))
-    sc = np.random.rand(pc.shape[0], pc.shape[1]) * 0.7 - 3 + noise[:,None]*1.5
-    sc[:, [0, 1]] = sc[:, [0, 1]] + 0.5
-    # sc.fill(-2.7)
-    rt = np.tile(np.array([1, 0, 0, 0]), (pc.shape[0], 1))
+    # rand1 = (torch.exp(rand1) - 1) / (torch.e - 1)
+    # rand2 = (torch.exp(rand2) - 1) / (torch.e - 1)
+    
+    rand1 = (1 - rand1)
 
-    fused_color = RGB2SH(torch.tensor(
-        np.tile(np.array([0.9, 0.9, 0.9]), (pc.shape[0], 1))).float().cuda())
+    mask1 = rand1 < noise2
+    mask2 = rand2 < noise
 
-    features = torch.zeros(
-        (fused_color.shape[0], 3, (gaussians.background.max_sh_degree + 1) ** 2)).float().cuda()
-    features[..., 0] = fused_color
+    pcl = torch.cat([pc[mask1], pc[mask1 & mask2] + torch.tensor([0, 0, 0.1], dtype=torch.float)], dim=0)
+    pcl_color = torch.cat([torch.tensor([[0.6, 0.6, 0.7]] * mask1.sum().item(), dtype=torch.float),
+                           torch.tensor([[0.8, 0.8, 0.8]] * (mask1 & mask2).sum().item(), dtype=torch.float)], dim=0)
 
-    print(features.shape)
+    snow_dense = 1.0
+    scale = snow_dense * pcl.shape[0]
+    mk = torch.randperm(pcl.shape[0])[:int(scale)]
+    pcl = pcl[mk]
+    pcl_color = pcl_color[mk]
 
-    save_ply(f"./output/waymo_full_exp/waymo_train_002/point_cloud/iteration_{str(scene.loaded_iter)}/snow_ply.ply", pc.cpu().numpy(), scales=sc, rots=rt,
+    sc, oc, rt, features = generate_points_meta(pcl.shape, pcl_color)
+
+    # [x] 使用yolo等看检测结果准度，
+    # [x] 雪的高斯点更稠密，大小更小
+    # 下雪与雪后
+    # 原图style装换后再训
+    # 
+
+    save_ply(f"./output/waymo_full_exp/waymo_train_002/point_cloud/iteration_{str(scene.loaded_iter)}/snow_ply.ply", pcl.numpy(), scales=sc, rots=rt,
              opacity=oc,
              features_dc=features[:, :, 0:1].transpose(
                  1, 2).contiguous().cpu().numpy(),
@@ -371,3 +482,5 @@ with torch.no_grad():
         cfg.trained_model_dir, f"iteration_{str(scene.loaded_iter)}.pth")
     assert os.path.exists(checkpoint_path)
     torch.save(gaussians.save_state_dict(True), checkpoint_path)
+
+    print(f'ADD_OBJ: MAX MEMORY: {(torch.cuda.max_memory_allocated() / (1024 * 1024)): .2f} MB')

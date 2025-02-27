@@ -130,4 +130,5 @@ with torch.no_grad():
         #    pass
 
     vis.summarize()
-    exit(0)
+    
+    print(f'CAM_FLY: MAX MEMORY: {(torch.cuda.max_memory_allocated() / (1024 * 1024)): .2f} MB')

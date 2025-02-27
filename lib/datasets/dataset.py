@@ -57,5 +57,8 @@ class Dataset():
             print("Loading Training Cameras")
             self.train_cameras[resolution_scale] = cameraList_from_camInfos(self.scene_info.train_cameras, resolution_scale)
             print("Loading Test Cameras")
-            self.test_cameras[resolution_scale] = cameraList_from_camInfos(self.scene_info.test_cameras, resolution_scale)
+            if self.cfg.use_test_cam:
+                self.test_cameras[resolution_scale] = cameraList_from_camInfos(self.scene_info.test_cameras, resolution_scale)
+            else:
+                self.test_cameras = self.train_cameras
             

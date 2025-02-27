@@ -65,9 +65,9 @@ def render_trajectory():
     # Assuming A (fog color) and beta are given
     cfg.render.fog = True
     fog_color = torch.tensor([0.9, 0.9, 0.9]).to(cfg.data_device)
-    fog_beta = 0.03
+    fog_beta = 0.1
     cfg.render.fog_color = fog_color.tolist()
-    
+
     print('begin render traj')
 
     with torch.no_grad():
@@ -77,10 +77,10 @@ def render_trajectory():
 
         scene = Scene(gaussians=gaussians, dataset=dataset)
         renderer = StreetGaussianRenderer()
-        
+
         save_dir = os.path.join(cfg.model_path, 'trajectory', "ours_{}".format(scene.loaded_iter))
         visualizer = StreetGaussianVisualizer(save_dir)
-        
+
         train_cameras = scene.getTrainCameras()
         test_cameras = scene.getTestCameras()
         cameras = train_cameras + test_cameras
@@ -101,12 +101,12 @@ def render_trajectory():
                 # fog_img = rgb * dx + A * (1 - dx)
                 result['rgb'] = (rgb.to(cfg.data_device) * dx.unsqueeze(0) + fog_color.unsqueeze(1).unsqueeze(2) * (1 - dx.unsqueeze(0))).cpu()
                 # print(result['rgb'].shape)
-            
-            
+
+
             visualizer.visualize(result, camera)
 
         visualizer.summarize()
-            
+
 if __name__ == "__main__":
     print("Rendering " + cfg.model_path)
     safe_state(cfg.eval.quiet)
@@ -117,3 +117,4 @@ if __name__ == "__main__":
         render_trajectory()
     else:
         raise NotImplementedError()
+    print(f'RENDER: MAX MEMORY: {(torch.cuda.max_memory_allocated() / (1024 * 1024)): .2f} MB')

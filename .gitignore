@@ -13,3 +13,7 @@ sbatch*
 submit.sh
 _test.py
 *.out
+
+test*
+yolo*
+*.mp4
