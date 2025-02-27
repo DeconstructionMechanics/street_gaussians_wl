@@ -17,3 +17,5 @@ _test.py
 test*
 yolo*
 *.mp4
+*.egg-info
+__pycache__
