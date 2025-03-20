@@ -88,4 +88,4 @@ if __name__ == '__main__':
     torch.cuda.synchronize()
     e = time.time()
 
-    print(f'Test 2: Pass diff_gaussian_rasterization !, using {1000* (e - s)}ms')
+    print(f'Test 2: Pass diff_gaussian_rasterization!, using {1000* (e - s)}ms')

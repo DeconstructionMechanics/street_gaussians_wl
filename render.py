@@ -63,7 +63,7 @@ def render_trajectory():
     cfg.render.save_image = False
     cfg.render.save_video = True
     # Assuming A (fog color) and beta are given
-    cfg.render.fog = True
+    cfg.render.fog = False
     fog_color = torch.tensor([0.9, 0.9, 0.9]).to(cfg.data_device)
     fog_beta = 0.1
     cfg.render.fog_color = fog_color.tolist()

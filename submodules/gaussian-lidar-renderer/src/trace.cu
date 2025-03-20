@@ -45,7 +45,7 @@ trace_bvh_cuda(int32_t num_rays, int32_t* nodes, float* aabbs,
                         stack_device.push(rid);
                     }
                 }                
-else{
+                else{
                     if(interection_r.y > 0){
                         stack_device.push(rid);
                     }
@@ -121,7 +121,6 @@ else{
                     int32_t node_id = stack2.pop();
                     int32_t* node = nodes + node_id * 5;
                     if(node[3] >= 0){
-
                         int32_t object_id = node[3];
                         float t = ray_intersects(means3D[object_id], ray_o, ray_d);
                         // float t = ray_intersects(means3D[object_id], covs3D + object_id*6, ray_o, ray_d);
@@ -149,9 +148,6 @@ else{
                     }
                 }
                 assert(count2 == count2_total);
-
-
-
             }
             else{
                 int32_t lid = node[1], rid = node[2];

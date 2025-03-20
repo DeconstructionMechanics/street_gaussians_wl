@@ -9,6 +9,7 @@ from lib.utils.general_utils import PILtoTorch, NumpytoTorch, matrix_to_quaterni
 from lib.utils.img_utils import visualize_depth_numpy
 from lib.models.scene import Scene
 import copy
+import time
 from PIL import Image
 import numpy as np
 import tqdm
@@ -96,17 +97,17 @@ dX = [-1, -1, -1,  0, 0,  1, 1, 1]
 dY = [-1,  0,  1, -1, 1, -1, 0, 1]
 ld = 8
 
-def is_floating_depth(i, j, depth):
+def count_adj(i, j, depth, th=0.5):
     flg = 0
     for k in range(ld):
         if i+dX[k] < 0 or i+dX[k] >= depth.shape[0] or j+dY[k] < 0 or j+dY[k] >= depth.shape[1]:
             continue
-        if not is_diff_depth(depth[i][j], depth[i+dX[k]][j+dY[k]]):
-            if flg == 2:
-                return False
-            else:
-                flg += 1
-    return True
+        if not is_diff_depth(depth[i][j], depth[i+dX[k]][j+dY[k]], th):
+            flg += 1
+    return flg
+
+def is_floating_depth(i, j, depth, th=0.1):
+    return count_adj(i, j, depth, th) < 4
 
 import queue
 
@@ -139,6 +140,53 @@ def count_adj_points(i, j, depth, cnt_arr):
         x, y = q.get()
         cnt_arr[x][y] = cnt
 
+def adaptive_median_filter(image, n=3, A=0.5):
+    """
+    Apply an adaptive median filter to smooth an image while preserving edges.
+    
+    Parameters:
+        image (np.array): Grayscale image as a NumPy array.
+        n (int): Size of the filter window (must be odd).
+        A (int): Intensity difference threshold.
+    
+    Returns:
+        np.array: The filtered image.
+    """
+    pdw = n//2
+    padded = np.pad(image, pad_width=pdw, mode='reflect')
+    output = np.zeros_like(image)
+
+    for i in range(image.shape[0]):
+        for j in range(image.shape[1]):
+            # Extract local neighborhood
+            window = padded[i-pdw:i+pdw, j-pdw:j+pdw].flatten()
+            center_value = image[i, j]
+            
+            # Keep only values within threshold
+            valid_pixels = window[np.abs(window - center_value) <= A] if not np.isnan(center_value) else window
+            
+            # Compute median of valid pixels
+            if valid_pixels.size > 0:
+                output[i, j] = np.median(valid_pixels)
+            else:
+                output[i, j] = np.median(window)  # If no valid pixels, floating
+
+    return output
+
+def adaptive_median_filter__(image, n = 3, A = 0.5):
+    pdw = n//2
+    padded = np.pad(image, pad_width=pdw, mode='reflect')
+    
+    def filter_func(window: np.ndarray):
+        center_value = window[len(window) // 2]
+        valid_pixels = window[np.abs(window - center_value) <= A] if not np.isnan(center_value) else window
+        return np.median(valid_pixels) if valid_pixels.size > 0 else np.median(window)
+    
+    footprint = np.ones((2 * pdw + 1, 2 * pdw + 1))
+    output = generic_filter(padded, filter_func, footprint=footprint, mode='nearest')
+    
+    return output[pdw:-pdw, pdw:-pdw]  # Crop back to original size
+
 def depth_to_point_cloud_torch(depth: np.ndarray, fovX: float, fovY: float, world_view_transform: torch.Tensor):
     """
     Converts a depth map to a 3D point cloud in world coordinates.
@@ -155,7 +203,11 @@ def depth_to_point_cloud_torch(depth: np.ndarray, fovX: float, fovY: float, worl
     # Convert depth to a torch tensor
     depth = depth.squeeze()
 
+    # calc time used
+    start = time.time()
     depth = median_filter(depth, size=5)
+    print('median_filter time:', time.time()-start)
+    start = time.time()
 
     # remove discontinuous points
     cnt_arr = np.zeros(depth.shape)
@@ -167,17 +219,39 @@ def depth_to_point_cloud_torch(depth: np.ndarray, fovX: float, fovY: float, worl
         for j in range(depth.shape[1]):
             if depth[i][j] != np.nan and cnt_arr[i][j] < 300:
                 depth[i][j] = np.nan
+    print('remove discontinuous points time:', time.time()-start)
+    start = time.time()
+    depth = adaptive_median_filter(depth, n=5, A=0.5)
+    for i in range(depth.shape[0]):
+        for j in range(depth.shape[1]):
+            cnt_arr[i][j] = count_adj(i, j, depth)
+    for i in range(depth.shape[0]):
+        for j in range(depth.shape[1]):
+            depth[i][j] = depth[i][j] if cnt_arr[i][j] > 2 else np.nan
+    # depth = adaptive_median_filter(depth, n=5, A=0.5)
+    for i in range(depth.shape[0]):
+        for j in range(depth.shape[1]):
+            cnt_arr[i][j] = count_adj(i, j, depth)
+    for i in range(depth.shape[0]):
+        for j in range(depth.shape[1]):
+            depth[i][j] = depth[i][j] if cnt_arr[i][j] > 2 else np.nan
+    depth = adaptive_median_filter(depth, A=0.5)
+    print('adaptive_median_filter time:', time.time()-start)
+    start = time.time()
     
     depth = zoom(depth, 6, order=1)
+    print('zoom time:', time.time()-start)
+    start = time.time()
     
     # remove floating points
     depth2 = depth.copy()
     for i in range(depth.shape[0]):
         for j in range(depth.shape[1]):
-            if is_floating_depth(i,j, depth):
+            if is_floating_depth(i,j, depth, th=0.07):
                 depth2[i][j] = np.nan
     # print(depth2)
     depth = depth2.copy()
+    print('remove floating points time:', time.time()-start)
     # def nan_to_mean(values):
     #     valid_values = values[~np.isnan(values)]
     #     return np.nanmean(valid_values) if valid_values.size > 0 else np.nan
@@ -333,7 +407,7 @@ def save_ply(filename, points, opacity=None, features_dc=None, features_extra=No
     print(f"PLY file saved to {filename}")
 
 def generate_points_meta(shape, color = None):
-    sc = np.random.rand(shape[0], shape[1]) * 0.3 - 4
+    sc = np.random.rand(shape[0], shape[1]) * 0.3 - 3.5
     
     oc = np.ones((shape[0]))
     oc.fill(5)
@@ -380,7 +454,11 @@ with torch.no_grad():
     # cam = Camera(cam_old.id, R, T, cam_old.FoVx, cam_old.FoVy, cam_old.K.cpu().numpy(), cam_old.original_image, 'BEV', cam_old.trans, cam_old.scale, cam_old.meta, )
     # cam.ego_pose = cam_old.ego_pose
     # cam.extrinsic = cam_old.extrinsic
-    gaussians.background.background_mask = torch.mean(gaussians.background._scaling, dim=1) < 0
+    sc_m, _  = torch.max(gaussians.background._scaling, dim=1)
+    gaussians.background.background_mask = ((sc_m < 0) & (gaussians.background._opacity.flatten() > -5.7))
+    # print('mask: ', torch.mean(gaussians.background.background_mask.to(torch.float16)))
+    print('sc_shape', gaussians.background.get_scaling.shape, gaussians.background._scaling.shape)
+    sys.stdout.flush()
 
     R = np.array(cam_old.R)
     theta_max = -1.57
@@ -399,6 +477,7 @@ with torch.no_grad():
     TT[1] += 500
     TT[2] -= 150
     cam = loadCam(camd, RR, np.linalg.inv(RRR) @ TT)
+    print('K:', camd['K'])
 
     ret = renderer.render_background(cam, gaussians)
 
@@ -419,11 +498,11 @@ with torch.no_grad():
     pc, mask, t_shape = depth_to_point_cloud_torch(
         depth, cam.FoVx, cam.FoVy, cam.world_view_transform)
     
-    noise = generate_perlin_noise_2d((4096, 4096), (8, 8))
+    noise = generate_perlin_noise_2d((4096, 4096), (16, 16))
     noise = zoom(noise, (t_shape[0]/noise.shape[0], t_shape[1]/noise.shape[1]))
     noise = noise[mask].flatten()
 
-    noise2 = generate_perlin_noise_2d((4096, 4096), (16, 16))
+    noise2 = generate_perlin_noise_2d((4096, 4096), (32, 32))
     # noise2 = torch.randn((4096, 4096))*2-1
     noise2 = zoom(noise2, (t_shape[0]/noise2.shape[0], t_shape[1]/noise2.shape[1]))
     noise2 = noise2[mask].flatten()
@@ -438,18 +517,16 @@ with torch.no_grad():
     noise = torch.from_numpy(noise)
     noise2 = torch.from_numpy(noise2)
     
-    rand1 = torch.rand((pc.shape[0], ))
-    rand2 = torch.rand((pc.shape[0], ))
+    rand1 = torch.rand((pc.shape[0], ))*0.5+0.1
+    rand2 = torch.rand((pc.shape[0], ))*0.5+0.2
 
     # rand1 = (torch.exp(rand1) - 1) / (torch.e - 1)
     # rand2 = (torch.exp(rand2) - 1) / (torch.e - 1)
-    
-    rand1 = (1 - rand1)
 
-    mask1 = rand1 < noise2
-    mask2 = rand2 < noise
+    mask1 = rand1 < noise
+    mask2 = rand2 < noise2
 
-    pcl = torch.cat([pc[mask1], pc[mask1 & mask2] + torch.tensor([0, 0, 0.1], dtype=torch.float)], dim=0)
+    pcl = torch.cat([pc[mask1], pc[mask1 & mask2] + torch.tensor([0, 0, 0.05], dtype=torch.float)], dim=0)
     pcl_color = torch.cat([torch.tensor([[0.6, 0.6, 0.7]] * mask1.sum().item(), dtype=torch.float),
                            torch.tensor([[0.8, 0.8, 0.8]] * (mask1 & mask2).sum().item(), dtype=torch.float)], dim=0)
 
