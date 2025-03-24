@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import copy
 import torch.nn as nn
+import torch.nn.functional as F
 import cv2
 import math
 from PIL import Image
@@ -43,8 +44,8 @@ class Camera(nn.Module):
         for name, mask in masks.items():
             setattr(self, name, mask)
         
-        self.original_image = image.clamp(0, 1)
-        self.image_height, self.image_width = self.original_image.shape[1], self.original_image.shape[2]
+        original_image = image.clamp(0, 1)
+        self.image_height, self.image_width = original_image.shape[1], original_image.shape[2]
         self.zfar = 1000.0
         self.znear = 0.001
         self.world_view_transform = torch.tensor(getWorld2View2(R, T, trans, scale)).transpose(0, 1).cuda()
@@ -65,6 +66,14 @@ class Camera(nn.Module):
         if 'extrinsic' in self.meta.keys():
             self.extrinsic = torch.from_numpy(self.meta['extrinsic']).float().cuda()
             del self.meta['extrinsic']
+        
+        self.c2w = self.world_view_transform.transpose(0, 1).inverse()
+
+        self.image_for_training = original_image.permute(1, 2, 0).contiguous()
+        
+        self.total_n_rays = self.image_width * self.image_height
+        self.enable_train_sampling = False
+        self.sample_idx = None
                 
     def set_extrinsic(self, c2w):
         w2c = np.linalg.inv(c2w)
@@ -95,6 +104,21 @@ class Camera(nn.Module):
     def get_intrinsic(self):
         ixt = self.K.cpu().numpy()
         return ixt
+    
+    def get_original_image(self):
+        return self.original_image
+    
+    def get_rays(self):
+        v, u = torch.meshgrid(torch.arange(self.image_height, device='cuda'),
+                              torch.arange(self.image_width, device='cuda'), indexing="ij")
+        focal_x = self.image_width / (2 * np.tan(self.FoVx * 0.5))
+        focal_y = self.image_height / (2 * np.tan(self.FoVy * 0.5))
+        rays_d_camera = torch.stack([(u - self.image_width / 2 + 0.5) / focal_x,
+                                  (v - self.image_height / 2 + 0.5) / focal_y,
+                                  torch.ones_like(u)], dim=-1)
+        rays_d = rays_d_camera @ self.world_view_transform[:3, :3].T
+        rays_o = self.camera_center[None].expand_as(rays_d).contiguous()
+        return rays_o, rays_d
     
         
 class MiniCam:

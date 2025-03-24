@@ -13,6 +13,9 @@ from lib.utils.data_utils import to_cuda
 from plyfile import PlyData, PlyElement
 from lib.utils.camera_utils import Camera
 
+import trimesh
+from grtr import GRTR, GRTRSettings
+
 
 class GaussianModel(nn.Module):
     def __init__(self, model_name='background', num_classes=1):
@@ -50,6 +53,24 @@ class GaussianModel(nn.Module):
         self.percent_dense = 0
         self.spatial_lr_scale = 0
         self.setup_functions()
+        
+        # icosahedron, outer sphere radius is 1.0
+        icosahedron = trimesh.creation.icosahedron()
+        
+        # change to inner sphere radius equal to 1.0
+        # the central point of each face must be on the unit sphere
+        self.unit_icosahedron_vertices = torch.from_numpy(icosahedron.vertices).float().cuda() * 1.2584 
+        self.unit_icosahedron_faces = torch.from_numpy(icosahedron.faces).long().cuda()
+        
+        self.gaussian_tracer = GRTR()
+        self.alpha_min = 1 / 255
+        
+        # icosphere
+        icosphere = trimesh.creation.uv_sphere(count=[240, 240])
+        unit_icosphere_vertices = torch.from_numpy(icosphere.vertices).float().cuda() * 0.40 + torch.tensor([0.0, 0.8, -0.75]).cuda()
+        unit_icosphere_faces = torch.from_numpy(icosphere.faces).long().cuda()
+        self.unit_icosphere_mesh_vertices = unit_icosphere_vertices[unit_icosphere_faces]
+
     
     def create_from_pcd(self, pcd : BasicPointCloud, spatial_lr_scale : float):
         self.spatial_lr_scale = spatial_lr_scale
@@ -615,3 +636,69 @@ class GaussianModel(nn.Module):
         
     def parse_camera(self, camera: Camera):
         pass
+
+    def get_boundings(self, alpha_min=0.01):
+        mu = self.get_xyz
+        opacity = self.get_opacity
+        
+        L = build_scaling_rotation(self.get_scaling, self.get_rotation)
+        
+        vertices_b = (2 * (opacity/alpha_min).log()).sqrt()[:, None] * (self.unit_icosahedron_vertices[None] @ L.transpose(-1, -2)) + mu[:, None]
+        faces_b = self.unit_icosahedron_faces[None] + torch.arange(mu.shape[0], device="cuda")[:, None, None] * 12
+        return vertices_b.reshape(-1, 3), faces_b.reshape(-1, 3)
+    
+    def get_SinvR(self):
+        return build_scaling_rotation(1 / self.get_scaling, self.get_rotation)
+
+    def build_bvh(self):
+        vertices_b, faces_b = self.get_boundings(alpha_min=self.alpha_min)
+        self.gaussian_tracer.build_BVH(vertices_b, faces_b)
+        
+    def update_bvh(self):
+        vertices_b, faces_b = self.get_boundings(alpha_min=self.alpha_min)
+        self.gaussian_tracer.update_BVH(vertices_b, faces_b)
+        
+    def trace(self, rays_o, rays_d):
+        tracer_settings = GRTRSettings(launch_x=rays_o.shape[0],
+                                       launch_y=1,
+                                       launch_z=1,
+                                       alpha_min=self.alpha_min,
+                                       transmittance_min=1e-3,
+                                       sh_degree=self.active_sh_degree)
+
+        SinvR = self.get_SinvR()
+        means3D = self.get_xyz
+        shs = self.get_features
+        opacity = self.get_opacity
+        colors, depth, alpha = self.gaussian_tracer.trace(rays_o, rays_d, means3D, opacity, SinvR, shs, tracer_settings)
+        return {
+            "render": colors,
+            "depth": depth,
+            "alpha" : alpha,
+        }
+
+    def hybrid_trace_test(self, rays_o, rays_d):
+        tracer_settings = GRTRSettings(launch_x=rays_o.shape[0],
+                                       launch_y=1,
+                                       launch_z=1,
+                                       alpha_min=self.alpha_min,
+                                       transmittance_min=1e-3,
+                                       sh_degree=self.active_sh_degree)
+        
+        SinvR = self.get_SinvR()
+        means3D = self.get_xyz
+        shs = self.get_features
+        opacity = self.get_opacity
+        colors, depth, alpha = self.gaussian_tracer.hybrid_trace_test(rays_o,
+                                                                      rays_d,
+                                                                      means3D,
+                                                                      opacity,
+                                                                      SinvR,
+                                                                      shs,
+                                                                      self.unit_icosphere_mesh_vertices,
+                                                                      tracer_settings)
+        return {
+            "render": colors,
+            "depth": depth,
+            "alpha" : alpha,
+        }

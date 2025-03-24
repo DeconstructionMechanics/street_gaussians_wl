@@ -46,11 +46,11 @@ class StreetGaussianVisualizer():
             torchvision.utils.save_image(rgb_bkgd, os.path.join(self.result_dir, f'{name}_rgb_bkgd.png'))
             torchvision.utils.save_image(rgb_obj, os.path.join(self.result_dir, f'{name}_rgb_obj.png'))
             torchvision.utils.save_image(acc_obj.float(), os.path.join(self.result_dir, f'{name}_acc_obj.png'))
-            torchvision.utils.save_image(camera.original_image[:3], os.path.join(self.result_dir, f'{name}_gt.png'))
+            # torchvision.utils.save_image(camera.original_image[:3], os.path.join(self.result_dir, f'{name}_gt.png'))
     
         if self.save_video:
-            rgb_gt = (camera.original_image[:3].detach().cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8)
-            self.rgbs_gt.append(rgb_gt)
+            # rgb_gt = (camera.original_image[:3].detach().cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8)
+            # self.rgbs_gt.append(rgb_gt)
             rgb_bkgd = (rgb_bkgd.detach().cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8)
             self.rgbs_bkgd.append(rgb_bkgd)
             rgb = (rgb.detach().cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8)                                            
@@ -62,7 +62,7 @@ class StreetGaussianVisualizer():
             self.accs_obj.append(acc_obj)
 
         
-        self.visualize_diff(result, camera)
+        # self.visualize_diff(result, camera)
         self.visualize_depth(result, camera)
         self.visualize_normal(result, camera)
     

@@ -322,7 +322,6 @@ def depth_to_point_cloud_torch(depth: np.ndarray, fovX: float, fovY: float, worl
 
     return points_world_space.cpu(), valid_mask.cpu(), t_shape
 
-
 def save_ply(filename, points, opacity=None, features_dc=None, features_extra=None,
              scales=None, rots=None, semantic=None):
     """
