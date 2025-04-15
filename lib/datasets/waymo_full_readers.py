@@ -60,6 +60,7 @@ def readWaymoFullInfo(path, images='images', split_train=-1, split_test=-1, **kw
     mono_depth_dir = os.path.join(path, 'mono_depth')
     load_mono_depth = cfg.data.use_mono_depth and (cfg.mode == 'train') and os.path.exists(mono_depth_dir)
 
+    print('build_pointcloud', build_pointcloud)
     output = generate_dataparser_outputs(
         datadir=path, 
         selected_frames=selected_frames,

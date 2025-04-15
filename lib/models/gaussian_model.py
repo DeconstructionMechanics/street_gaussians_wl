@@ -518,7 +518,7 @@ class GaussianModel(nn.Module):
             torch.max(self.get_scaling, dim=1).values > self.percent_dense * padded_extent)
 
         self.scalar_dict['points_split'] = selected_pts_mask.sum().item()
-        print(f'Number of points to split: {selected_pts_mask.sum()}')
+        # print(f'Number of points to split: {selected_pts_mask.sum()}')
 
         stds = self.get_scaling[selected_pts_mask].repeat(N, 1)
         means = torch.zeros((stds.size(0), 3), device="cuda")
@@ -553,7 +553,7 @@ class GaussianModel(nn.Module):
             torch.max(self.get_scaling, dim=1).values <= self.percent_dense * scene_extent)
 
         self.scalar_dict['points_clone'] = selected_pts_mask.sum().item()
-        print(f'Number of points to clone: {selected_pts_mask.sum()}')
+        # print(f'Number of points to clone: {selected_pts_mask.sum()}')
         
         new_xyz = self._xyz[selected_pts_mask]
         new_features_dc = self._features_dc[selected_pts_mask]

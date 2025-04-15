@@ -31,7 +31,7 @@ class Scene:
             # First check if there is a point cloud saved and get the iteration to load from
             assert(os.path.exists(cfg.point_cloud_dir))
             if cfg.loaded_iter == -1:
-                self.loaded_iter = searchForMaxIteration(cfg.point_cloud_dir)
+                self.loaded_iter = searchForMaxIteration(cfg.trained_model_dir)
             else:
                 self.loaded_iter = cfg.loaded_iter
 

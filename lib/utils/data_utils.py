@@ -34,12 +34,12 @@ def get_split_data(split_train, split_test, data):
     return train_data, test_data
 
 def get_val_frames(num_frames: int, test_every: int, train_every: int):
-    if train_every is None or train_every < 0:
-        val_frames = set(np.arange(test_every, num_frames, test_every))
+    if train_every is None or train_every <= 0:
+        val_frames = set(np.arange(test_every-1, num_frames, test_every))
         train_frames = (set(np.arange(num_frames)) - val_frames) if test_every > 1 else set()
     else:
         train_frames = set(np.arange(0, num_frames, train_every))
-        val_frames = (set(np.arange(num_frames)) - train_frames) if train_every > 1 else set()
+        val_frames = (set(np.arange(test_every-1, num_frames, test_every)) - train_frames) if train_every > 1 else set()
 
     train_frames = sorted(list(train_frames))
     val_frames = sorted(list(val_frames))

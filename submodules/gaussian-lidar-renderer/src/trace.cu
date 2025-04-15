@@ -346,12 +346,13 @@ void trace_bvh_opacity_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t G, i
                         float power = gaussian_fn(means3D[object_id2], pos, covs3D + object_id2 * 6);
                         if(power > 0) continue;
                         float alpha = opacities[object_id2] * __expf(power);
-                        t_value += ray_opacity * alpha * t;
-                        intensity += ray_opacity * alpha * features.x;
-                        raydrop += ray_opacity * alpha * features.y;
+                        // printf("[gaussian_lidar_renderer] float alpha = opacities[object_id2] * __expf(power) : %f = %f * __expf(%f)\n", alpha, opacities[object_id2], power);
+                        float Talpha = ray_opacity * alpha;
+                        t_value += Talpha * t;
+                        intensity += Talpha * features.x;
+                        raydrop += Talpha * features.y;
 
                         if (needs_grad){
-                            float Talpha = ray_opacity * alpha;
                             float min_Talpha = -1;
                             int32_t min_Talpha_id = -1;
                             for (int32_t iG = 0; iG < G; iG++){
@@ -374,6 +375,7 @@ void trace_bvh_opacity_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t G, i
                         }
                         count += 1;
                         ray_opacity *= 1 - alpha;
+                        // printf("[gaussian_lidar_renderer] ray_opacity *= 1 - alpha : %f *= 1 - %f\n", ray_opacity, alpha);
                         if(ray_opacity < 0.0001f){
                             break;
                         }
@@ -403,7 +405,10 @@ void trace_bvh_opacity_cuda(int32_t num_rays, int32_t D, int32_t M, int32_t G, i
             }
         }
         num_contributes[idx] = count;
-        rendered_tvalue[idx] = t_value / (1 - ray_opacity);
+        rendered_tvalue[idx] = t_value / max(0.0001f, 1 - ray_opacity);
+        // if (isnan(t_value) || isnan(ray_opacity) || isnan(rendered_tvalue[idx])) {
+        //     printf("[gaussian_lidar_renderer] rendered_tvalue[%f] = t_value / (1 - ray_opacity) : %f = %f / (1 - %f)\n", idx, rendered_tvalue[idx], t_value, ray_opacity);
+        // }
         rendered_opacity[idx] = 1 - ray_opacity;
         rendered_intensity[idx] = intensity;
         rendered_raydrop[idx] = raydrop;

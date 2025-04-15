@@ -26,6 +26,9 @@ from lib.models.sky_cubemap import SkyCubeMap
 from lib.models.color_correction import ColorCorrection
 from lib.models.camera_pose import PoseCorrection
 
+
+from lib.lidar.gaussian_lidar_util import LiDARCamera
+
 class StreetGaussianModel(nn.Module):
     def __init__(self, metadata):
         super().__init__()
@@ -291,6 +294,19 @@ class StreetGaussianModel(nn.Module):
                     flip_mask = torch.rand_like(obj_model.get_xyz[:, 0]) < self.flip_prob
                 self.flip_mask.append(flip_mask)
             self.flip_mask = torch.cat(self.flip_mask, dim=0)   
+
+    def parse_lidar_camera(self, lidar_camera: LiDARCamera):
+        self.graph_obj_list = []
+        if self.include_obj:
+            timestamp = lidar_camera.timestamp
+            for i, obj_name in enumerate(self.obj_list):
+                obj_model: GaussianModelActor = getattr(self, obj_name)
+                start_timestamp, end_timestamp = obj_model.start_timestamp, obj_model.end_timestamp
+                if timestamp >= start_timestamp and timestamp <= end_timestamp and self.get_visibility(obj_name):
+                    self.graph_obj_list.append(obj_name)
+                    num_gaussians_obj = getattr(self, obj_name).get_xyz.shape[0]
+                    self.num_gaussians += num_gaussians_obj
+
             
     @property
     def get_scaling(self):
@@ -553,6 +569,14 @@ class StreetGaussianModel(nn.Module):
             self.pose_correction.update_optimizer()
 
     def set_max_radii2D(self, radii, visibility_filter):
+        def pad_tensor(target_tensor, target_length, pad_value):
+            if target_tensor.shape[0] >= target_length:
+                return target_tensor
+            pad_len = target_length - target_tensor.shape[0]
+            padding_tensor = torch.full((pad_len, *target_tensor.shape[1:]), fill_value=pad_value, device=target_tensor.device, dtype=target_tensor.dtype)
+            target_tensor = torch.cat([target_tensor, padding_tensor])
+            return target_tensor
+
         radii = radii.float()
         
         for model_name in self.graph_gaussian_range.keys():
@@ -560,11 +584,23 @@ class StreetGaussianModel(nn.Module):
             start, end = self.graph_gaussian_range[model_name]
             end += 1
             visibility_model = visibility_filter[start:end]
+            visibility_model = pad_tensor(visibility_model, end - start, False)
             max_radii2D_model = radii[start:end]
+            max_radii2D_model = pad_tensor(max_radii2D_model, end - start, 0)
+            if visibility_filter.shape[0] < (end - start):
+                print('[street_gaussian_model.py]', model.get_xyz.shape, start, end, visibility_filter.shape)
             model.max_radii2D[visibility_model] = torch.max(
                 model.max_radii2D[visibility_model], max_radii2D_model[visibility_model])
         
     def add_densification_stats(self, viewspace_point_tensor, visibility_filter):
+        def pad_tensor(target_tensor, target_length, pad_value):
+            if target_tensor.shape[0] >= target_length:
+                return target_tensor
+            pad_len = target_length - target_tensor.shape[0]
+            padding_tensor = torch.full((pad_len, *target_tensor.shape[1:]), fill_value=pad_value, device=target_tensor.device, dtype=target_tensor.dtype)
+            target_tensor = torch.cat([target_tensor, padding_tensor])
+            return target_tensor
+        
         viewspace_point_tensor_grad = viewspace_point_tensor.grad
 
         for model_name in self.graph_gaussian_range.keys():
@@ -572,7 +608,9 @@ class StreetGaussianModel(nn.Module):
             start, end = self.graph_gaussian_range[model_name]
             end += 1
             visibility_model = visibility_filter[start:end]
+            visibility_model = pad_tensor(visibility_model, end - start, False)
             viewspace_point_tensor_grad_model = viewspace_point_tensor_grad[start:end]
+            viewspace_point_tensor_grad_model = pad_tensor(viewspace_point_tensor_grad_model, end - start, 0)
             model.xyz_gradient_accum[visibility_model, 0:1] += torch.norm(viewspace_point_tensor_grad_model[visibility_model, :2], dim=-1, keepdim=True)
             model.xyz_gradient_accum[visibility_model, 1:2] += torch.norm(viewspace_point_tensor_grad_model[visibility_model, 2:], dim=-1, keepdim=True)
             model.denom[visibility_model] += 1

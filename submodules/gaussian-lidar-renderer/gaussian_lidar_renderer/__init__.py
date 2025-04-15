@@ -27,7 +27,7 @@ except Exception as e:
 
 class GaussianLidarRenderer(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, means3D, scales, rotations, opacity, shs, sh_degree, rays_o, rays_d, aabb_scale: float=10):
+    def forward(ctx, means3D, scales, rotations, opacity, shs, sh_degree, rays_o, rays_d, aabb_scale: float=30):
         P = means3D.shape[0]
         rot = build_rotation(rotations)
         nodes = torch.full((2 * P - 1, 5), -1, device="cuda").int()
@@ -59,17 +59,29 @@ class GaussianLidarRenderer(torch.autograd.Function):
 
         tree, aabb, morton = _C.create_bvh(means3D, scales, rotations, nodes, aabbs)
 
-        rays_o = rays_o + rays_d * 0.05
+        rays_d /= torch.linalg.vector_norm(rays_d, ord=2, dim=-1, keepdim=True)
+        rays_o_offset = 0.05
+        rays_o = rays_o + rays_d * rays_o_offset
         symm_inv = covariance_activation(scales, rotations)
         
         needs_grad = ctx.needs_input_grad[0]
         n_gaussian_backward = 32
+
+        # print('[GaussianLidarRenderer] needs_grad', needs_grad)
+        # print('[GaussianLidarRenderer] isnan(rays_o)', torch.isnan(rays_o).any())
+        # print('[GaussianLidarRenderer] isnan(rays_d)', torch.isnan(rays_d).any())
+        # print('[GaussianLidarRenderer] isnan(means3D)', torch.isnan(means3D).any())
+        # print('[GaussianLidarRenderer] isnan(symm_inv)', torch.isnan(symm_inv).any())
+        # print('[GaussianLidarRenderer] isnan(opacity)', torch.isnan(opacity).any())
+        # print('[GaussianLidarRenderer] isnan(shs)', torch.isnan(shs).any())
 
         cotrib, opa, tvalue, intensity, raydrop,\
         contribute_gid, contribute_depth, contribute_T, contribute_clamp,\
         contribute_tprime, contribute_intensityprime, contribute_raydropprime,\
         = _C.trace_bvh_opacity(tree, aabb, rays_o, rays_d, means3D, symm_inv, opacity, shs, sh_degree, needs_grad, n_gaussian_backward)
         
+        tvalue += rays_o_offset
+
         # n_contribute, weights, tvalues, intensities, raydrops = cotrib.unsqueeze(-1), opa.unsqueeze(-1), tvalue.unsqueeze(-1), intensity.unsqueeze(-1), raydrop.unsqueeze(-1)
         n_contribute, weights, tvalues, intensities, raydrops = cotrib, opa, tvalue, intensity, raydrop
         
@@ -82,6 +94,11 @@ class GaussianLidarRenderer(torch.autograd.Function):
             ctx.sh_degree = sh_degree
         else:
             ctx.save_for_backward(None)
+
+        # print('[GaussianLidarRenderer] isnan(weights)', torch.isnan(weights).any())
+        # print('[GaussianLidarRenderer] isnan(tvalues)', torch.isnan(tvalues).any())
+        # print('[GaussianLidarRenderer] isnan(intensities)', torch.isnan(intensities).any())
+        # print('[GaussianLidarRenderer] isnan(raydrops)', torch.isnan(raydrops).any())
         return n_contribute, weights, tvalues, intensities, raydrops
     
     @staticmethod
@@ -120,14 +137,19 @@ class GaussianLidarRenderer(torch.autograd.Function):
             rays_o, rays_d,\
             grad_weights, grad_tvalues, grad_intensity, grad_raydrop)
         
-        grad_means3D += grad_means3D_from_trace
-        grad_opacity += grad_opacity_from_trace
-        grad_shs += grad_shs_from_trace
+        if not torch.isnan(grad_means3D_from_trace).any():
+            grad_means3D += grad_means3D_from_trace
+        if not torch.isnan(grad_covs3D_from_trace).any():
+            grad_opacity += grad_opacity_from_trace
+        if not torch.isnan(grad_shs_from_trace).any():
+            grad_shs += grad_shs_from_trace
         
         # backward covariance_activation
         grad_scales_from_covs3D, grad_rotations_from_covs3D = backward_covariance(grad_covs3D_from_trace, scales, rotations)
-        grad_scales += grad_scales_from_covs3D
-        grad_rotations += grad_rotations_from_covs3D
+        if not torch.isnan(grad_scales_from_covs3D).any():
+            grad_scales += grad_scales_from_covs3D
+        if not torch.isnan(grad_rotations_from_covs3D).any():
+            grad_rotations += grad_rotations_from_covs3D
 
         return grad_means3D, grad_scales, grad_rotations, grad_opacity, grad_shs, grad_sh_degree, grad_rays_o, grad_rays_d, grad_aabb_scale
 

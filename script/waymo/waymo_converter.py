@@ -192,19 +192,32 @@ def parse_seq_rawdata(process_list, root_dir, seq_name, seq_save_dir, track_file
 
         lidar_save_dir = os.path.join(seq_save_dir, 'lidar_ray')
         os.makedirs(lidar_save_dir, exist_ok=True)
+        pointcloud_save_dir = os.path.join(seq_save_dir, 'pointcloud')
+        os.makedirs(pointcloud_save_dir, exist_ok=True)
         
         pts_3d_all = dict()
         pts_2d_all = dict()
-        print("Processing LiDAR data...")
-                
+        print("Processing LiDAR data...")                    
+
+        # lidar ego_pose center_point
+        ego_frame_poses = []
+
         datafile = WaymoDataFileReader(seq_path)
+        for frame_id, frame in enumerate(datafile):
+            vehicle_pose = np.array(frame.pose.transform).reshape(4, 4)
+            ego_frame_poses.append(vehicle_pose)
 
+        ego_frame_poses = np.array(ego_frame_poses)
+        center_point = np.mean(ego_frame_poses[:, :3, 3], axis=0)
 
-        # TODO
+        lidar_union_mask = dict()
 
+        datafile = WaymoDataFileReader(seq_path)
         for frame_id, frame in tqdm(enumerate(datafile)):
             pts_3d = [] # LiDAR point cloud in world frame
             pts_2d = [] # LiDAR point cloud projection in camera [camera_name, w, h] 
+            vehicle_pose = np.array(frame.pose.transform).reshape(4, 4)
+            vehicle_pose[:3, 3] -= center_point
             
             for laser_name, laser_name_str in laser_names_dict.items():
                 laser = utils.get(frame.lasers, laser_name)
@@ -217,23 +230,33 @@ def parse_seq_rawdata(process_list, root_dir, seq_name, seq_save_dir, track_file
                 pts_3d.append(pcl[:, :3]) # save LiDAR pointcloud in vehicle frame 
                 
                 # Transform LIDAR point cloud from vehicle frame to world frame
-                # vehicle_pose = np.array(frame.pose.transform).reshape(4, 4)
                 # pcl = vehicle_pose.dot(np.concatenate([pcl, np.ones((pcl.shape[0], 1))], axis=1).T).T
 
                 # LiDAR data collect for lidar_ray
-                extrinsic = np.array(laser_calibration.extrinsic.transform).reshape(4,4)
-                lidar_coordinate = extrinsic[:3, 3]
+                laser_to_vehicle = np.array(laser_calibration.extrinsic.transform).reshape(4,4)
+                lidar_coordinate = vehicle_pose.dot(laser_to_vehicle[:, 3])[:3]
                 ri_direction = np.copy(ri)
                 ri_direction[:, :, 0] = 1
                 pcl_direction, pcl_direction_attr = utils.project_to_pointcloud(frame, ri_direction, camera_projection, range_image_pose, laser_calibration)
-                lidar_ray_directions = pcl_direction[:, :3].reshape(ri.shape[0], ri.shape[1], 3)
-                                    
+                pcl_direction = np.hstack((pcl_direction, np.ones((pcl_direction.shape[0], 1))))
+                pcl_direction = vehicle_pose.dot(pcl_direction.T).T[:, :3]
+                pcl_direction -= lidar_coordinate
+                lidar_ray_directions = pcl_direction.reshape(ri.shape[0], ri.shape[1], 3)
+
+                                
                 mask = ri[:, :, 0] > 0
                 camera_projection = camera_projection[mask]
 
                 # LiDAR second response for lidar_ray
                 ri_2, camera_projection_2, range_image_pose_2 = utils.parse_range_image_and_camera_projection(laser, second_response=True)
                 mask_2 = ri_2[:, :, 0] > 0
+
+                # lidar_union_mask
+                if laser_name not in lidar_union_mask:
+                    lidar_union_mask[laser_name] = mask | mask_2
+                else:
+                    lidar_union_mask[laser_name] |= mask | mask_2
+
 
                 # Can be projected to multi-cameras, order: [FRONT, FRONT_LEFT, FRONT_RIGHT, SIDE_LEFT, SIDE_RIGHT].
                 # Only save the first projection camera,
@@ -254,7 +277,7 @@ def parse_seq_rawdata(process_list, root_dir, seq_name, seq_save_dir, track_file
                 
                 pts_2d.append(camera_projection)
 
-                # LiDAR data save for lidar_ray
+                # LiDAR data save for lidar_ray, vehicle pose
                 npz_path = os.path.join(lidar_save_dir, f'{frame_id:06d}_{str(laser_name - 1)}.npz')
                 np.savez_compressed(npz_path,
                                     lidar_coordinate=lidar_coordinate,
@@ -263,6 +286,12 @@ def parse_seq_rawdata(process_list, root_dir, seq_name, seq_save_dir, track_file
                                     mask_1=mask,
                                     range_image_2=ri_2,
                                     mask_2=mask_2)
+                
+                # save pointcloud for gaussian init
+                np.savez_compressed(os.path.join(pointcloud_save_dir, f'{frame_id:06d}_{str(laser_name - 1)}.npz'), 
+                                    pointcloud=pcl[:, :3],
+                                    camera_projection=camera_projection)
+
 
 
             #print(beams_dict)
@@ -272,8 +301,16 @@ def parse_seq_rawdata(process_list, root_dir, seq_name, seq_save_dir, track_file
             pts_2d_all[frame_id] = pts_2d
                                                 
         np.savez_compressed(f'{seq_save_dir}/pointcloud.npz', 
-                            pointcloud=pts_3d_all, 
+                            pointcloud=pts_3d_all,
                             camera_projection=pts_2d_all)
+        
+        # save lidar_union_mask
+        lidar_union_mask_dir = os.path.join(seq_save_dir, 'lidar_union_mask')
+        os.makedirs(lidar_union_mask_dir, exist_ok=True)
+        for laser_name, mask in lidar_union_mask.items():
+            np.save(os.path.join(lidar_union_mask_dir, f'{str(laser_name - 1)}.npy'), mask)
+    
+
         print("Processing LiDAR data done...")
 
     if 'track' in process_list:

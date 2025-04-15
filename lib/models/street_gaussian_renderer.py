@@ -205,11 +205,11 @@ class StreetGaussianRenderer():
         else:
             colors_precomp = override_color
 
-        print("[street gaussian renderer] pc.get_features ", pc.get_features.shape)
-        if shs is not None:
-            print("[street gaussian renderer] shs ", shs.shape)
-        if colors_precomp is not None:
-            print("[street gaussian renderer] colors_precomp ", colors_precomp.shape)
+        # print("[street gaussian renderer] pc.get_features ", pc.get_features.shape)
+        # if shs is not None:
+        #     print("[street gaussian renderer] shs ", shs.shape)
+        # if colors_precomp is not None:
+        #     print("[street gaussian renderer] colors_precomp ", colors_precomp.shape)
 
         # TODO: add more feature here
         feature_names = []
@@ -234,7 +234,10 @@ class StreetGaussianRenderer():
             features = None
         
         
-        # Rasterize visible Gaussians to image, obtain their radii (on screen). 
+        # Rasterize visible Gaussians to image, obtain their radii (on screen).
+        # if pc.frame % 7 == 0:
+        #     print(f'saving ply for frame {pc.training}_{pc.frame}')
+        #     save_ply(means3D.detach().cpu().numpy(), opacity.detach().cpu().numpy().reshape(-1), f'output_test/{pc.training}_{pc.frame}.ply')
         rendered_color, radii, rendered_depth, rendered_acc, rendered_feature = rasterizer(
             means3D = means3D,
             means2D = means2D,
@@ -246,36 +249,6 @@ class StreetGaussianRenderer():
             cov3D_precomp = cov3D_precomp,
             semantics = features,
         )
-
-        lidar_feature_map = [False, False, False, True, True]
-        #lidar_sh = pc.get_features[:, :, lidar_feature_map]
-        lidar_sh = pc.get_features[:, :, lidar_feature_map]
-
-        aabb_scale = 20
-        print('Render begins:')
-
-        lidar_beam_data = np.load('total_data.npz',allow_pickle=True)
-
-        total_data = lidar_beam_data['total'].astype(np.float32)
-
-        lidar_position = torch.from_numpy(total_data[:,:3])
-        beams = torch.from_numpy(total_data[:,3:])
-
-
-        lidar_n_contribute, lidar_weights, lidar_t_values, lidar_intensity, lidar_raydrop = GaussianLidarRenderer.apply(
-            means3D,
-            pc.get_scaling, 
-            pc.get_rotation,
-            opacity,
-            lidar_sh,
-            pc.max_sh_degree,
-            lidar_position,
-            beams,
-            aabb_scale)
-        lidar_mask_rule = (lidar_t_values.reshape(-1) > 0.1) & (lidar_t_values.reshape(-1) < 74) & (lidar_weights.reshape(-1) > 0.5)
-        lidar_mask_raydrop = lidar_raydrop > 0.5
-
-        
 
 
         if cfg.mode != 'train':
@@ -304,6 +277,13 @@ class StreetGaussianRenderer():
         
         # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
         # They will be excluded from value updates used in the splitting criteria.
+        
+
+        # print('[render_kernel] means3D.shape[0] != radii.shape[0]', means3D.shape, radii.shape)
+        # if means3D.shape[0] > radii.shape[0]:
+        #     pad_len = means3D.shape[0] - radii.shape[0]
+        #     padding_tensor = torch.full((pad_len, *radii.shape[1:]), fill_value=0, device=radii.device, dtype=radii.dtype)
+        #     radii = torch.cat([radii, padding_tensor])
         
         result = {
             "rgb": rendered_color,

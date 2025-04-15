@@ -417,7 +417,7 @@ def generate_dataparser_outputs(
         for obj_tracklet in obj_tracklets:
             track_id = int(obj_tracklet[0])
             if track_id >= 0:
-                obj_pose_vehicle = np.eye(4)    
+                obj_pose_vehicle = np.eye(4)
                 obj_pose_vehicle[:3, :3] = quaternion_to_matrix_numpy(obj_tracklet[4:8])
                 obj_pose_vehicle[:3, 3] = obj_tracklet[1:4]
                 obj_length = object_info[track_id]['length']
@@ -471,16 +471,25 @@ def generate_dataparser_outputs(
                      
         print('initialize from lidar pointcloud')
         pointcloud_path = os.path.join(datadir, 'pointcloud.npz')
-        pts3d_dict = np.load(pointcloud_path, allow_pickle=True)['pointcloud'].item()
-        pts2d_dict = np.load(pointcloud_path, allow_pickle=True)['camera_projection'].item()
+        # pts3d_dict = np.load(pointcloud_path, allow_pickle=True)['pointcloud'].item()
+        # pts2d_dict = np.load(pointcloud_path, allow_pickle=True)['camera_projection'].item()
+        init_frames = []
+        for range_param in cfg.train_lidar.init_frames:
+            init_frames += list(range(*range_param))
 
-        for i, frame in tqdm(enumerate(range(start_frame, end_frame+1))):
+        for i, frame in tqdm(enumerate(init_frames)):
             idxs = list(range(i * num_cameras, (i+1) * num_cameras))
             cams_frame = [cams[idx] for idx in idxs]
             image_filenames_frame = [image_filenames[idx] for idx in idxs]
             
-            raw_3d = pts3d_dict[frame]
-            raw_2d = pts2d_dict[frame]
+            # init_frames from config
+            pts_3d = []
+            pts_2d = []
+            for camera_id in cfg.train_lidar.init_cameras:
+                pts_3d.append(np.load(os.path.join(datadir, 'pointcloud', f'{frame:06d}_{camera_id}.npz'), allow_pickle=True)['pointcloud'])
+                pts_2d.append(np.load(os.path.join(datadir, 'pointcloud', f'{frame:06d}_{camera_id}.npz'), allow_pickle=True)['camera_projection'])
+            raw_3d = np.concatenate(pts_3d, axis=0)
+            raw_2d = np.concatenate(pts_2d, axis=0)
             
             # use the first projection camera
             points_camera_all = raw_2d[..., 0]
@@ -490,8 +499,13 @@ def generate_dataparser_outputs(
             # each point should be observed by at least one camera in camera lists
             mask = np.array([c in cameras for c in points_camera_all]).astype(np.bool_)
             
-            # get filtered LiDAR pointcloud position and color        
-            points_xyz_vehicle = raw_3d[mask]
+            # get filtered LiDAR pointcloud position and color  
+            if cfg.train_lidar.init_mask:
+                points_xyz_vehicle = raw_3d[mask]
+            else:
+                points_xyz_vehicle = raw_3d
+
+            print('[waymo_utils.py]', raw_2d.shape, mask.shape, raw_3d[mask].shape, raw_3d.shape)
 
             # transfrom LiDAR pointcloud from vehicle frame to world frame
             ego_pose = ego_frame_poses[frame]
@@ -502,9 +516,14 @@ def generate_dataparser_outputs(
             points_xyz_world = points_xyz_vehicle @ ego_pose.T
             
             points_rgb = np.ones_like(points_xyz_vehicle[:, :3])
-            points_camera = points_camera_all[mask]
-            points_projw = points_projw_all[mask]
-            points_projh = points_projh_all[mask]
+            if cfg.train_lidar.init_mask:
+                points_camera = points_camera_all[mask]
+                points_projw = points_projw_all[mask]
+                points_projh = points_projh_all[mask]
+            else:
+                points_camera = points_camera_all
+                points_projw = points_projw_all
+                points_projh = points_projh_all
 
             for cam, image_filename in zip(cams_frame, image_filenames_frame):
                 mask_cam = (points_camera == cam)

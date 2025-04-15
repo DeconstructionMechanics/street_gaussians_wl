@@ -21,7 +21,7 @@ class Camera(nn.Module):
         id,
         R, T, 
         FoVx, FoVy, K,
-        image, image_name, 
+        image, image_name,
         trans = np.array([0.0, 0.0, 0.0]), 
         scale = 1.0,
         metadata = dict(),
