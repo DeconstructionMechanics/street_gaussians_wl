@@ -12,8 +12,11 @@ from lib.visualizers.base_visualizer import BaseVisualizer as Visualizer
 from lib.visualizers.street_gaussian_visualizer import StreetGaussianVisualizer
 import time
 
+from lib.utils.system_utils import searchForMaxIteration
+
 from lib.lidar.gaussian_lidar_renderer import LiDARCamera, render_lidar
 from lib.lidar.gaussian_lidar_util import save_ply
+from lib.lidar.trainable_mask import LiDARMask
 import random
 import numpy as np
 
@@ -165,6 +168,27 @@ def render_trajectory():
 
         visualizer.summarize()
 
+
+        # lidar mask
+        lidar_shape = {}
+        train_frames = []
+        for range_param in cfg.train_lidar.train_frames:
+            train_frames += list(range(*range_param))
+        frame_id = train_frames[0]
+        for camera_id in cfg.train_lidar.train_cameras:
+            lidar_camera = LiDARCamera(cfg.source_path, frame_id, camera_id)
+            lidar_shape[camera_id] = lidar_camera.get_mask().shape
+        lidar_mask = LiDARMask(lidar_shape, cfg.train_lidar.mask_lr)
+        
+        if cfg.loaded_iter == -1:
+            loaded_iter = searchForMaxIteration(cfg.trained_model_dir)
+        else:
+            loaded_iter = cfg.loaded_iter
+        lidar_mask_ckpt_path = os.path.join(cfg.trained_model_dir, f'lidar_mask_{loaded_iter}.pth')
+        lidar_mask.load_state_dict(torch.load(lidar_mask_ckpt_path))
+
+
+
         lidar_save_dir = os.path.join(save_dir, 'lidar')
         os.makedirs(lidar_save_dir, exist_ok=True)
         times = []
@@ -179,23 +203,26 @@ def render_trajectory():
                 lidar_camera = LiDARCamera(cfg.source_path, frame_id, camera_id)
                 start_time = time.time()
                 result = render_lidar(lidar_camera, gaussians, cfg.train_lidar.aabb_scale)
+                result['depth'], result['intensity'], result['raydrop'] = lidar_mask(result['depth'], result['intensity'], result['raydrop'], lidar_camera.camera_id)
                 end_time = time.time()
                 times.append(end_time - start_time)
 
                 range_image = torch.cat((result['depth'].reshape(-1, 1), result['intensity'].reshape(-1, 1), result['raydrop'].reshape(-1, 1)), dim=1).reshape(lidar_camera.h, lidar_camera.w, 3)
-                pointcloud_raydrop = (lidar_camera.get_ray_o() + lidar_camera.get_ray_d() * result['depth'].reshape(-1, 1))[result['raydrop'] > 0.5]
-                pointcloud_weights = (lidar_camera.get_ray_o() + lidar_camera.get_ray_d() * result['depth'].reshape(-1, 1))[result['weights'] > -0.5]
+                raydrop_mask = result['raydrop'] > 0.02
+                weights_mask = result['weights'] > 0.04
+                pointcloud_raydrop = (lidar_camera.get_ray_o() + lidar_camera.get_ray_d() * result['depth'].reshape(-1, 1))[raydrop_mask]
+                pointcloud_weights = (lidar_camera.get_ray_o() + lidar_camera.get_ray_d() * result['depth'].reshape(-1, 1))[weights_mask]
                 pointcloud_gt = (lidar_camera.get_ray_o() + lidar_camera.get_ray_d() * lidar_camera.get_depth().reshape(-1, 1))[lidar_camera.get_mask()]
 
                 np.savez_compressed(os.path.join(lidar_save_dir, f'{frame_id:06d}_{camera_id}.npz'),
                                     range_image=range_image.cpu().numpy(),
                                     pointcloud=pointcloud_raydrop.cpu().numpy()
                                     )
-                save_ply(points_np=pointcloud_raydrop.cpu().numpy(), weights_np=result['intensity'][result['raydrop'] > 0.5].cpu().numpy(), ply_path=os.path.join(lidar_save_dir, f'{frame_id:06d}_{camera_id}_raydrop.ply'))
-                save_ply(points_np=pointcloud_weights.cpu().numpy(), weights_np=result['weights'][result['weights'] > -0.5].cpu().numpy(), ply_path=os.path.join(lidar_save_dir, f'{frame_id:06d}_{camera_id}_weights.ply'))
+                save_ply(points_np=pointcloud_raydrop.cpu().numpy(), weights_np=result['intensity'][raydrop_mask].cpu().numpy(), ply_path=os.path.join(lidar_save_dir, f'{frame_id:06d}_{camera_id}_raydrop.ply'))
+                save_ply(points_np=pointcloud_weights.cpu().numpy(), weights_np=result['weights'][weights_mask].cpu().numpy(), ply_path=os.path.join(lidar_save_dir, f'{frame_id:06d}_{camera_id}_weights.ply'))
                 save_ply(points_np=pointcloud_gt.cpu().numpy(), weights_np=lidar_camera.get_intensity()[lidar_camera.get_mask()].cpu().numpy(), ply_path=os.path.join(lidar_save_dir, f'{frame_id:06d}_{camera_id}_gt.ply'))
     
-                print(f'[{frame_id:06d}_{camera_id}], time: {(end_time - start_time) * 1000} ms')
+                print(f"[{frame_id:06d}_{camera_id}], time: {(end_time - start_time) * 1000} ms, n_contribute: {torch.mean(result['n_contribute'].float())}, {torch.max(result['n_contribute'])}")
 
         print("\nLiDAR rendering complete")
         print("average FPS: ", len(times) / sum(times))

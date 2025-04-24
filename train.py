@@ -24,6 +24,7 @@ except ImportError:
 
 from lib.lidar.gaussian_lidar_renderer import render_lidar
 from lib.lidar.gaussian_lidar_util import LiDARCamera
+from lib.lidar.trainable_mask import LiDARMask
 import sys
 
 
@@ -44,6 +45,17 @@ def training():
     scene = Scene(gaussians=gaussians, dataset=dataset)
 
     gaussians.training_setup()
+
+    lidar_shape = {}
+    train_frames = []
+    for range_param in cfg.train_lidar.train_frames:
+        train_frames += list(range(*range_param))
+    frame_id = train_frames[0]
+    for camera_id in cfg.train_lidar.train_cameras:
+        lidar_camera = LiDARCamera(cfg.source_path, frame_id, camera_id)
+        lidar_shape[camera_id] = lidar_camera.get_mask().shape
+    lidar_mask = LiDARMask(lidar_shape, cfg.train_lidar.mask_lr)
+
     # try:
     #     if cfg.loaded_iter == -1:
     #         loaded_iter = searchForMaxIteration(cfg.trained_model_dir)
@@ -54,6 +66,9 @@ def training():
     #     start_iter = state_dict['iter']
     #     print(f'Loading model from {ckpt_path}')
     #     gaussians.load_state_dict(state_dict)
+
+    #     lidar_mask_ckpt_path = os.path.join(cfg.trained_model_dir, f'lidar_mask_{loaded_iter}.pth')
+    #     lidar_mask.load_state_dict(torch.load(lidar_mask_ckpt_path))
     # except:
     #     pass
 
@@ -103,6 +118,7 @@ def training():
 
             lidar_camera = random.choice(lidar_camera_stack)
             result = render_lidar(lidar_camera, gaussians, cfg.train_lidar.aabb_scale)
+            result['depth'], result['intensity'], result['raydrop'] = lidar_mask(result['depth'], result['intensity'], result['raydrop'], lidar_camera.camera_id)
             loss = torch.zeros(1, dtype=torch.float32, device='cuda')
 
             # depth loss
@@ -391,6 +407,8 @@ def training():
             # Optimizer step
             if iteration < training_args.iterations:
                 gaussians.update_optimizer()
+                if 'lidar' in training_sensor:
+                    lidar_mask.update_optimizer()
 
             if (iteration in training_args.checkpoint_iterations):
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
@@ -398,6 +416,9 @@ def training():
                 state_dict['iter'] = iteration
                 ckpt_path = os.path.join(cfg.trained_model_dir, f'iteration_{iteration}.pth')
                 torch.save(state_dict, ckpt_path)
+
+                lidar_mask_ckpt_path = os.path.join(cfg.trained_model_dir, f'lidar_mask_{iteration}.pth')
+                torch.save(lidar_mask.state_dict(), lidar_mask_ckpt_path)
 
             # sys.stdout.flush()
 

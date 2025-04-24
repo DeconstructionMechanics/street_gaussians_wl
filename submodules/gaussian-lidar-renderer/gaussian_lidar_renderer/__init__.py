@@ -65,7 +65,7 @@ class GaussianLidarRenderer(torch.autograd.Function):
         symm_inv = covariance_activation(scales, rotations)
         
         needs_grad = ctx.needs_input_grad[0]
-        n_gaussian_backward = 32
+        n_gaussian_backward = 128
 
         # print('[GaussianLidarRenderer] needs_grad', needs_grad)
         # print('[GaussianLidarRenderer] isnan(rays_o)', torch.isnan(rays_o).any())
