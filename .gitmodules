@@ -1,0 +1,3 @@
+[submodule "submodules/grtr-deprecated"]
+	path = submodules/grtr-deprecated
+	url = https://github.com/IskXCr/grtr-deprecated.git
